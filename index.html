@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UptimeBar</title>
+    <script type="module" src="/src/popover.ts" defer></script>
+  </head>
+  <body class="popover">
+    <header class="popover-header">
+      <span id="summary" class="summary">Loading…</span>
+      <div class="actions">
+        <button id="refresh" title="Refresh now" class="icon-btn">⟳</button>
+        <button id="settings" title="Settings" class="icon-btn">⚙</button>
+      </div>
+    </header>
+    <ul id="list" class="monitor-list"></ul>
+    <div id="empty" class="empty" hidden>
+      No monitors yet. Open <strong>Settings</strong> to add a provider.
+    </div>
+  </body>
+</html>

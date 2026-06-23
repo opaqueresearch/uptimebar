@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UptimeBar Settings</title>
+    <script type="module" src="/src/settings.ts" defer></script>
+  </head>
+  <body class="settings">
+    <header class="app-header">
+      <h1>Settings</h1>
+      <p class="subtitle">Connect the uptime services you want in your menu bar.</p>
+    </header>
+
+    <section class="group">
+      <h2 class="group-title">Your Providers</h2>
+      <div class="card">
+        <ul id="providers" class="provider-list"></ul>
+      </div>
+    </section>
+
+    <section class="group">
+      <h2 class="group-title" id="form-title">Add Provider</h2>
+      <div class="card">
+        <form id="provider-form" novalidate>
+          <input type="hidden" id="id" />
+
+          <div class="form-row">
+            <label for="kind">Provider</label>
+            <div class="form-control">
+              <div class="select-wrap">
+                <select id="kind"></select>
+              </div>
+              <p class="field-help" id="kind-help"></p>
+              <a id="docs-link" class="field-link" hidden>Where do I find my API key?</a>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <label for="label">Name</label>
+            <div class="form-control">
+              <input id="label" placeholder="e.g. Production"
+                     autocapitalize="off" autocorrect="off" spellcheck="false" />
+            </div>
+          </div>
+
+          <div class="form-row" id="base-field">
+            <label for="base_url">Base URL <span class="req" id="base-req" hidden>Required</span></label>
+            <div class="form-control">
+              <input id="base_url" placeholder="https://…" type="url" inputmode="url"
+                     autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off" />
+              <p class="field-help" id="base-help"></p>
+            </div>
+          </div>
+
+          <div class="form-row" id="secret-field">
+            <label for="secret">API Key <span class="req" id="secret-req" hidden>Required</span></label>
+            <div class="form-control">
+              <div class="secret-input">
+                <input id="secret" type="password" placeholder="Paste your key"
+                       autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off" />
+                <button type="button" id="secret-toggle" class="reveal-btn"
+                        aria-label="Show key">Show</button>
+              </div>
+              <p class="field-help" id="secret-help"></p>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <label for="interval_secs">Check Interval</label>
+            <div class="form-control">
+              <div class="inline">
+                <input id="interval_secs" type="number" min="10" placeholder="60" />
+                <span class="suffix">seconds</span>
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <div id="result" class="result" hidden></div>
+
+      <div class="form-actions">
+        <button type="button" id="test" class="btn">Test Connection</button>
+        <span class="spacer"></span>
+        <button type="button" id="cancel" class="btn" hidden>Cancel</button>
+        <button type="submit" id="save" class="btn btn-primary" form="provider-form">Save</button>
+      </div>
+    </section>
+
+    <div id="toast" class="toast" aria-live="polite" hidden></div>
+  </body>
+</html>
