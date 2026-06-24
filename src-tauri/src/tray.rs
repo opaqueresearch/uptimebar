@@ -125,11 +125,36 @@ fn circle_icon(color: (u8, u8, u8)) -> Image<'static> {
     Image::new_owned(buf, s, s)
 }
 
-fn open_settings(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window("settings") {
-        let _ = win.show();
-        let _ = win.set_focus();
+/// Show the settings window centered on the monitor under the cursor, so it
+/// appears on the same screen the user is acting on — not always the primary.
+pub fn open_settings(app: &AppHandle) {
+    let Some(win) = app.get_webview_window("settings") else {
+        return;
+    };
+
+    if let Ok(cursor) = app.cursor_position() {
+        let mon = app
+            .monitor_from_point(cursor.x, cursor.y)
+            .ok()
+            .flatten()
+            .or_else(|| win.current_monitor().ok().flatten());
+        if let Some(m) = mon {
+            let size = win
+                .outer_size()
+                .map(|s| (s.width as f64, s.height as f64))
+                .unwrap_or((480.0, 600.0));
+            let mx = m.position().x as f64;
+            let my = m.position().y as f64;
+            let mw = m.size().width as f64;
+            let mh = m.size().height as f64;
+            let x = mx + (mw - size.0) / 2.0;
+            let y = my + (mh - size.1) / 2.0;
+            let _ = win.set_position(PhysicalPosition::new(x, y));
+        }
     }
+
+    let _ = win.show();
+    let _ = win.set_focus();
 }
 
 fn toggle_popover(app: &AppHandle, cursor: PhysicalPosition<f64>) {
@@ -140,7 +165,7 @@ fn toggle_popover(app: &AppHandle, cursor: PhysicalPosition<f64>) {
         let _ = win.hide();
         return;
     }
-    position_popover(&win, cursor);
+    position_popover(app, &win, cursor);
     let _ = win.show();
     let _ = win.set_focus();
 
@@ -151,18 +176,32 @@ fn toggle_popover(app: &AppHandle, cursor: PhysicalPosition<f64>) {
     state.refresh.notify_one();
 }
 
-fn position_popover(win: &WebviewWindow, cursor: PhysicalPosition<f64>) {
+fn position_popover(app: &AppHandle, win: &WebviewWindow, cursor: PhysicalPosition<f64>) {
     let size = win
         .outer_size()
         .map(|s| (s.width as f64, s.height as f64))
         .unwrap_or((POPOVER_W, POPOVER_H));
-    let w = size.0;
-    let (mon_x, mon_w) = win
-        .current_monitor()
+    let (w, h) = size;
+
+    // Clamp against the monitor the CLICK happened on — not the window's current
+    // monitor, which is wherever it was last shown (often the primary). Using the
+    // wrong monitor's bounds is what pushed the popover onto the other screen.
+    // Fall back to the window's current monitor, then a sane default.
+    let mon = app
+        .monitor_from_point(cursor.x, cursor.y)
         .ok()
         .flatten()
-        .map(|m| (m.position().x as f64, m.size().width as f64))
-        .unwrap_or((0.0, 1920.0));
+        .or_else(|| win.current_monitor().ok().flatten());
+    let (mon_x, mon_y, mon_w, mon_h) = mon
+        .map(|m| {
+            (
+                m.position().x as f64,
+                m.position().y as f64,
+                m.size().width as f64,
+                m.size().height as f64,
+            )
+        })
+        .unwrap_or((0.0, 0.0, 1920.0, 1080.0));
 
     let mut x = cursor.x - w / 2.0;
     let min_x = mon_x + 8.0;
@@ -171,9 +210,14 @@ fn position_popover(win: &WebviewWindow, cursor: PhysicalPosition<f64>) {
 
     // macOS tray is at the top, Windows at the bottom.
     #[cfg(target_os = "macos")]
-    let y = cursor.y + 6.0;
+    let mut y = cursor.y + 6.0;
     #[cfg(not(target_os = "macos"))]
-    let y = cursor.y - size.1 - 6.0;
+    let mut y = cursor.y - h - 6.0;
+
+    // Keep it on the click's monitor vertically too.
+    let min_y = mon_y + 8.0;
+    let max_y = mon_y + mon_h - h - 8.0;
+    y = y.clamp(min_y, max_y.max(min_y));
 
     let _ = win.set_position(PhysicalPosition::new(x, y));
 }

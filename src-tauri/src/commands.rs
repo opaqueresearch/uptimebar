@@ -72,10 +72,8 @@ pub fn refresh_now(state: State<AppState>) {
 
 #[tauri::command]
 pub fn open_settings(app: AppHandle) {
-    if let Some(win) = app.get_webview_window("settings") {
-        let _ = win.show();
-        let _ = win.set_focus();
-    }
+    // Single source of truth: center on the active monitor (see tray.rs).
+    crate::tray::open_settings(&app);
 }
 
 /// Dismiss the popover (hide, not destroy) — used by Esc.
