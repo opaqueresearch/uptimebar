@@ -21,7 +21,7 @@ long-lived state so monitoring keeps running even when no window is open:
 | `state.rs` | `AppState` + transition detection (the notification gate) |
 | `tray.rs` | tray icon (drawn in code), native menu, popover positioning |
 | `notify.rs` | transition → native notification |
-| `config.rs` | non-secret config (`tauri-plugin-store`) + secrets (OS keychain via `keyring`) |
+| `config.rs` | non-secret config (`tauri-plugin-store`) + secrets (0600 plaintext file today; OS keychain intended for signed builds — see Behavior notes) |
 | `commands.rs` | the `#[tauri::command]` surface for the UI |
 
 The frontend (`src/`) is vanilla TypeScript: `popover.ts` (the tray list) and
@@ -57,8 +57,17 @@ Add a provider type by dropping a new file in `providers/`, adding a match arm i
   monitor sets a silent baseline (no startup notification storm).
 - **Provider errors map to Unknown, not Down**, after `FAILURE_THRESHOLD`
   consecutive failures — a flaky API never masquerades as an outage.
-- **Secrets live in the OS keychain** (macOS Keychain / Windows Credential
-  Manager), never in the plaintext config store, and are write-only from the UI.
+- **Secrets are write-only from the UI** and are kept out of the synced config
+  store and out of git. They are **currently stored in a plaintext JSON file**
+  (`secrets.json`) in the app's local data dir, with `0600` (owner-only)
+  permissions — *not* encrypted, *not* in the OS keychain. This is a deliberate
+  workaround: the keychain binds each item to the app's code signature, so an
+  unsigned dev build can't read back what a previous rebuild wrote (keys
+  appeared to vanish after every recompile). The 0600 file survives rebuilds.
+  **Released (code-signed) builds SHOULD store secrets in the OS keychain**
+  (macOS Keychain / Windows Credential Manager) for encryption-at-rest and
+  per-app access control; the plaintext file should remain only as the
+  unsigned-dev fallback. See `config.rs` (`set_secret`/`get_secret`).
 
 ## Development
 
