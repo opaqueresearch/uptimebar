@@ -16,6 +16,7 @@ use crate::state::AppState;
 const STORE_FILE: &str = "settings.json";
 const PROVIDERS_KEY: &str = "providers";
 const INTERVAL_KEY: &str = "poll_interval_secs";
+const BROWSER_KEY: &str = "browser_app";
 const SECRETS_FILE: &str = "secrets.json";
 
 pub const DEFAULT_INTERVAL_SECS: u64 = 60;
@@ -99,6 +100,22 @@ pub fn poll_interval(app: &AppHandle) -> u64 {
         .and_then(|s| s.get(INTERVAL_KEY))
         .and_then(|v| v.as_u64())
         .unwrap_or(DEFAULT_INTERVAL_SECS)
+}
+
+/// The app name to open links with (e.g. "Google Chrome"). Empty string means
+/// "use the system default browser".
+pub fn browser_app(app: &AppHandle) -> String {
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|s| s.get(BROWSER_KEY))
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default()
+}
+
+pub fn set_browser_app(app: &AppHandle, value: &str) -> Result<(), String> {
+    let store = app.store(STORE_FILE).map_err(|e| e.to_string())?;
+    store.set(BROWSER_KEY, serde_json::Value::String(value.to_string()));
+    store.save().map_err(|e| e.to_string())
 }
 
 /// Rebuild the live provider registry from the persisted configs + keychain

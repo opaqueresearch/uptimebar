@@ -227,6 +227,37 @@ async function loadKinds() {
   onKindChange();
 }
 
+interface Browser {
+  name: string;
+  app: string;
+}
+
+/// Populate the "Open links in" dropdown with detected browsers and reflect the
+/// saved choice; persist on change.
+async function loadBrowsers() {
+  const browsers = await invoke<Browser[]>("get_browsers");
+  const current = await invoke<string>("get_browser_app");
+  const sel = el<HTMLSelectElement>("browser");
+  sel.innerHTML = "";
+  for (const b of browsers) {
+    const opt = document.createElement("option");
+    opt.value = b.app; // "" = system default
+    opt.textContent = b.name;
+    sel.append(opt);
+  }
+  // If a previously-chosen browser is no longer installed, fall back visually to
+  // the default (the backend already falls back at open time).
+  sel.value = browsers.some((b) => b.app === current) ? current : "";
+  sel.addEventListener("change", async () => {
+    try {
+      await invoke("set_browser_app", { value: sel.value });
+      toast("Browser preference saved.");
+    } catch (e) {
+      showResult("err", `Couldn't save: ${e}`);
+    }
+  });
+}
+
 async function loadProviders() {
   const providers = await invoke<ProviderConfig[]>("get_providers");
   const list = el<HTMLUListElement>("providers");
@@ -319,6 +350,7 @@ async function loadProviders() {
 window.addEventListener("DOMContentLoaded", async () => {
   await loadKinds();
   await loadProviders();
+  await loadBrowsers();
 
   // Live validation + clear stale results as the user types.
   for (const id of ["label", "base_url", "secret", "interval_secs"]) {
