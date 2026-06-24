@@ -114,6 +114,16 @@ body.popover {
   padding: 2px 8px;
   width: auto;
 }
+/* Engaged filter ("Problems") reads as an applied state. */
+.mode-btn.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.mode-btn.active:hover {
+  background: var(--accent);
+  color: var(--accent-fg);
+  filter: brightness(1.08);
+}
 
 .group-header {
   display: flex;
