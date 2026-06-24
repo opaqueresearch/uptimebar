@@ -391,9 +391,13 @@ body.settings {
   padding: 0 10px;
   cursor: pointer;
 }
-.reveal-btn:hover {
+.reveal-btn:hover:not(:disabled) {
   color: var(--fg);
   border-color: var(--muted);
+}
+.reveal-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* Popup-button styled select */
