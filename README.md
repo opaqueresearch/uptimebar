@@ -30,6 +30,10 @@ and `settings.html`.
 
 ## Providers
 
+> **Setup, API-key locations, key types, and deep-link support per service:
+> [docs/PROVIDERS.md](docs/PROVIDERS.md).**
+
+
 - **UptimeRobot** — POSTs to `getMonitors` with an account API key.
 - **Watch4.me** — `GET {base}/api/v1/dashboard/` with `Authorization: Bearer w4m_<token>`
   and `Accept: application/json`. This is Watch4.me's existing dashboard API

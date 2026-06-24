@@ -14,6 +14,7 @@ use super::{Monitor, MonitorStatus, Provider, ProviderConfig, ProviderError};
 pub struct Watch4Me {
     id: String,
     label: String,
+    base: String,
     endpoint: String,
     token: String,
     http: reqwest::Client,
@@ -34,6 +35,7 @@ impl Watch4Me {
             id: cfg.id.clone(),
             label: cfg.label.clone(),
             endpoint: format!("{base}/api/v1/dashboard/"),
+            base,
             token: secret,
             http,
         })
@@ -61,6 +63,10 @@ struct MonitorStats {
     is_stale: bool,
     #[serde(default)]
     latest_check_at: Option<String>,
+    /// UUID used in monitor page URLs. Not yet returned by the dashboard API; if
+    /// it appears, we deep-link to /monitors/<public_id>/ automatically.
+    #[serde(default)]
+    public_id: Option<String>,
 }
 
 fn map_status(m: &MonitorStats) -> MonitorStatus {
@@ -111,12 +117,19 @@ impl Provider for Watch4Me {
             .into_iter()
             .map(|m| {
                 let status = map_status(&m);
+                // Deep-link to the monitor page when the API gives us a public_id;
+                // otherwise fall back to the dashboard.
+                let detail_url = m
+                    .public_id
+                    .as_ref()
+                    .map(|pid| format!("{}/monitors/{}/", self.base, pid))
+                    .unwrap_or_else(|| format!("{}/dashboard", self.base));
                 Monitor {
                     name: m.name.unwrap_or_else(|| format!("monitor {}", m.id)),
                     status,
                     last_checked: m.latest_check_at,
                     url: m.url,
-                    detail_url: Some("https://watch4.me/dashboard".to_string()),
+                    detail_url: Some(detail_url),
                     id: m.id.to_string(),
                 }
             })

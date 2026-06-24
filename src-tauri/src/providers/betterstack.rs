@@ -111,10 +111,11 @@ impl Provider for BetterStack {
                     status: map_status(&item.attributes.status),
                     last_checked: item.attributes.last_checked_at,
                     url: item.attributes.url,
-                    detail_url: Some(format!(
-                        "https://uptime.betterstack.com/team/monitors/{}",
-                        item.id
-                    )),
+                    // BetterStack monitor pages live under /team/<slug>/monitors/<id>,
+                    // but the API doesn't expose the team URL slug, so we can't build
+                    // the per-monitor link. Fall back to the dashboard (redirects to
+                    // the logged-in user's team) instead of a 404.
+                    detail_url: Some("https://uptime.betterstack.com/".to_string()),
                     name,
                     id: item.id,
                 }

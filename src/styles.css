@@ -84,10 +84,64 @@ body.popover {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 12px;
+  padding: 8px 12px 8px 9px;
+  border-left: 3px solid transparent; /* color set inline per service */
 }
 .monitor:hover {
   background: var(--bg-elev);
+}
+.monitor.clickable {
+  cursor: pointer;
+}
+
+.mode-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  width: auto;
+}
+
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 12px 4px;
+  font-size: 12px;
+}
+.group-header:not(:first-child) {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+.gh-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.gh-label {
+  font-weight: 600;
+}
+.gh-kind {
+  color: var(--muted);
+  font-size: 11px;
+}
+.gh-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+.gh-count.has-down {
+  color: var(--down);
+}
+.open-hint {
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.monitor.clickable:hover .open-hint {
+  opacity: 1;
 }
 
 .dot {
