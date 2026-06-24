@@ -78,6 +78,14 @@ pub fn open_settings(app: AppHandle) {
     }
 }
 
+/// Dismiss the popover (hide, not destroy) — used by Esc.
+#[tauri::command]
+pub fn close_popover(app: AppHandle) {
+    if let Some(win) = app.get_webview_window("popover") {
+        let _ = win.hide();
+    }
+}
+
 /// Build a provider ad-hoc and run a single fetch — used by the "Test
 /// connection" button before committing config.
 #[tauri::command]

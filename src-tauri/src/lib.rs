@@ -34,6 +34,7 @@ pub fn run() {
             commands::provider_has_secret,
             commands::refresh_now,
             commands::open_settings,
+            commands::close_popover,
             commands::open_url,
             commands::get_browsers,
             commands::get_browser_app,
