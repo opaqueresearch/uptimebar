@@ -11,6 +11,7 @@ use super::{Monitor, MonitorStatus, Provider, ProviderConfig, ProviderError};
 pub struct Healthchecks {
     id: String,
     label: String,
+    base: String,
     endpoint: String,
     api_key: String,
     http: reqwest::Client,
@@ -27,6 +28,7 @@ impl Healthchecks {
             id: cfg.id.clone(),
             label: cfg.label.clone(),
             endpoint: format!("{base}/api/v3/checks/"),
+            base,
             api_key: secret,
             http,
         }
@@ -106,12 +108,19 @@ impl Provider for Healthchecks {
                     .clone()
                     .or_else(|| c.unique_key.clone())
                     .unwrap_or_else(|| format!("check-{i}"));
+                // Deep-link to the check detail page when we have the uuid (full
+                // API keys only — read-only keys omit it). Otherwise the list.
+                let detail_url = c
+                    .uuid
+                    .as_ref()
+                    .map(|u| format!("{}/checks/{}/details/", self.base, u))
+                    .unwrap_or_else(|| format!("{}/checks/", self.base));
                 Monitor {
                     name: c.name.unwrap_or_else(|| id.clone()),
                     status: map_status(&c.status),
                     last_checked: c.last_ping,
                     url: c.ping_url,
-                    detail_url: Some("https://healthchecks.io/checks/".to_string()),
+                    detail_url: Some(detail_url),
                     id,
                 }
             })
