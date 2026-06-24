@@ -10,9 +10,9 @@ type; see [Deep-links](#click-to-open--deep-links).
 
 | Service | Base URL | Auth | Key for UptimeBar | Per-monitor deep-link |
 |---|---|---|---|---|
-| **Watch4.me** | `https://watch4.me` | `Authorization: Bearer w4m_…` | API token | Dashboard today; per-monitor pending ([watch4.me#698]) |
+| **Watch4.me** | `https://watch4.me` | `Authorization: Bearer w4m_…` | API token | ✅ `/monitors/<uuid>/` |
 | **UptimeRobot** | _(fixed, none)_ | `api_key` form field | Main API key (read-only OK) | Dashboard |
-| **BetterStack** | `https://uptime.betterstack.com` | `Authorization: Bearer …` | Uptime API token (team-scoped) | ❌ opens dashboard — API lacks the team URL slug |
+| **BetterStack** | `https://uptime.betterstack.com` | `Authorization: Bearer …` | Uptime API token (team-scoped) | ✅ with the optional **Team** slug; else dashboard |
 | **Healthchecks.io** | `https://healthchecks.io` (or self-hosted) | `X-Api-Key` | Project key — **full key** for deep-links | ✅ only with a full key (read-only omits the UUID) |
 | **Uptime Kuma** | `https://kuma.host/status/<slug>` | none (public status page) | — | Status page |
 
@@ -22,9 +22,8 @@ type; see [Deep-links](#click-to-open--deep-links).
 - **Base URL:** `https://watch4.me`
 - **Key:** create an API token in Watch4.me; it starts with `w4m_`.
 - Reads `GET /api/v1/dashboard/` (`Accept: application/json`).
-- **Deep-link:** opens the dashboard for now. Per-monitor links
-  (`/monitors/<uuid>/`) turn on automatically once the API returns `public_id`
-  — tracked in [watch4.me#698]. No app change needed when it ships.
+- **Deep-link:** ✅ opens the specific monitor (`/monitors/<public_id>/`).
+  Enabled by `public_id` in the dashboard API response ([watch4.me#698], deployed).
 
 ### UptimeRobot
 - **Base URL:** not needed (the API host is fixed).
@@ -37,9 +36,11 @@ type; see [Deep-links](#click-to-open--deep-links).
 - **Key:** **API tokens → Team-based tokens → _(your team)_ → Uptime API tokens.**
   Tokens are **team-scoped**.
 - Reads the **first page** (50 monitors); additional pages are not fetched yet.
-- **Deep-link:** ❌ not supported. The monitors API returns `team_name` but **not**
-  the `t<id>` URL slug, so we can't build `/team/<slug>/monitors/<id>`. Clicking
-  opens the BetterStack dashboard, which redirects to your team.
+- **Team field (optional, for deep-links):** the monitors API returns `team_name`
+  but **not** the `t<id>` URL slug, so per-monitor links need it supplied once.
+  Paste the `t…` segment from any BetterStack URL
+  (`uptime.betterstack.com/team/<this>/…`) into the provider's **Team** field.
+  Filled → clicks open `/team/<slug>/monitors/<id>`; empty → the dashboard.
 
 ### Healthchecks.io
 - **Base URL:** `https://healthchecks.io` (or your self-hosted instance).
@@ -48,7 +49,8 @@ type; see [Deep-links](#click-to-open--deep-links).
   returns its own project's checks).
 - **Key type matters:**
   - **Read-only key** — lists checks, but Healthchecks omits each check's `uuid`
-    and ping URL, so clicking opens the general checks list.
+    and ping URL, so clicking opens your Healthchecks home (which redirects to
+    your checks) rather than the specific check.
   - **Full (read-write) key** — includes the `uuid`, so clicking deep-links to
     `/checks/<uuid>/details/`.
   - Use a **full key** if you want per-check links.
@@ -68,7 +70,8 @@ land on the *specific* monitor depends on what the provider's API exposes:
 - **Read-only keys can block deep-links.** Some services (Healthchecks) strip the
   per-monitor identifier from read-only API responses — use a full key for links.
 - **Some data simply isn't in the API.** BetterStack doesn't return the team URL
-  slug; Watch4.me doesn't yet return `public_id` ([watch4.me#698]).
+  slug — supply it once in the provider's **Team** field (see above) to enable
+  deep-links.
 
 When UptimeBar can't build a per-monitor URL, it opens the closest working page
 (the dashboard or check list) rather than a broken link.

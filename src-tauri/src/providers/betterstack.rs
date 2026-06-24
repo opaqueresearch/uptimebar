@@ -10,9 +10,27 @@ use super::{Monitor, MonitorStatus, Provider, ProviderConfig, ProviderError};
 pub struct BetterStack {
     id: String,
     label: String,
+    base: String,
+    /// Team URL slug (e.g. "t550046"), supplied by the user — the API doesn't
+    /// expose it. Enables per-monitor deep-links when present.
+    team: Option<String>,
     endpoint: String,
     token: String,
     http: reqwest::Client,
+}
+
+/// Accept either a bare slug ("t550046") or a pasted dashboard URL containing
+/// "/team/<slug>/", and return the slug.
+fn normalize_team(raw: &str) -> Option<String> {
+    let s = raw.trim().trim_matches('/');
+    if s.is_empty() {
+        return None;
+    }
+    let slug = match s.find("/team/") {
+        Some(i) => s[i + "/team/".len()..].split('/').next().unwrap_or(s),
+        None => s.split('/').next().unwrap_or(s),
+    };
+    (!slug.is_empty()).then(|| slug.to_string())
 }
 
 impl BetterStack {
@@ -25,7 +43,9 @@ impl BetterStack {
         Self {
             id: cfg.id.clone(),
             label: cfg.label.clone(),
+            team: cfg.extra.as_deref().and_then(normalize_team),
             endpoint: format!("{base}/api/v2/monitors"),
+            base,
             token: secret,
             http,
         }
@@ -111,11 +131,13 @@ impl Provider for BetterStack {
                     status: map_status(&item.attributes.status),
                     last_checked: item.attributes.last_checked_at,
                     url: item.attributes.url,
-                    // BetterStack monitor pages live under /team/<slug>/monitors/<id>,
-                    // but the API doesn't expose the team URL slug, so we can't build
-                    // the per-monitor link. Fall back to the dashboard (redirects to
-                    // the logged-in user's team) instead of a 404.
-                    detail_url: Some("https://uptime.betterstack.com/".to_string()),
+                    // Per-monitor link needs the team URL slug, which the API
+                    // doesn't return — use the one the user supplied if any,
+                    // else fall back to the dashboard (avoids a 404).
+                    detail_url: Some(match &self.team {
+                        Some(team) => format!("{}/team/{}/monitors/{}", self.base, team, item.id),
+                        None => format!("{}/", self.base),
+                    }),
                     name,
                     id: item.id,
                 }

@@ -93,6 +93,10 @@ pub struct ProviderConfig {
     pub base_url: Option<String>,
     #[serde(default)]
     pub interval_secs: Option<u64>,
+    /// Optional provider-specific value (e.g. BetterStack team slug). Interpreted
+    /// by the adapter; surfaced in the UI only when the provider's meta asks for it.
+    #[serde(default)]
+    pub extra: Option<String>,
 }
 
 #[async_trait::async_trait]
@@ -141,6 +145,10 @@ pub struct ProviderMeta {
     /// This provider needs an API key/token.
     pub requires_secret: bool,
     pub secret_label: String,
+    /// When set, the form shows an extra optional text field with this label.
+    pub extra_label: Option<String>,
+    pub extra_placeholder: String,
+    pub extra_help: String,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -165,12 +173,15 @@ fn meta(
         requires_base_url,
         requires_secret,
         secret_label: secret_label.into(),
+        extra_label: None,
+        extra_placeholder: String::new(),
+        extra_help: String::new(),
     }
 }
 
 /// The provider kinds the UI offers, with prefill + field metadata.
 pub fn kinds_meta() -> Vec<ProviderMeta> {
-    vec![
+    let mut kinds = vec![
         meta(
             "uptimerobot",
             "UptimeRobot",
@@ -226,5 +237,18 @@ pub fn kinds_meta() -> Vec<ProviderMeta> {
             true,
             "read-only API key",
         ),
-    ]
+    ];
+
+    // BetterStack monitor pages need a team URL slug the API doesn't expose, so
+    // let the user supply it once (optional — empty just means no deep-links).
+    if let Some(bs) = kinds.iter_mut().find(|m| m.kind == "betterstack") {
+        bs.extra_label = Some("Team".to_string());
+        bs.extra_placeholder = "t550046".to_string();
+        bs.extra_help =
+            "Optional, for click-through. The t… segment from your BetterStack URL: \
+             uptime.betterstack.com/team/<this>/…"
+                .to_string();
+    }
+
+    kinds
 }

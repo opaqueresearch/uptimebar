@@ -110,11 +110,15 @@ impl Provider for Healthchecks {
                     .unwrap_or_else(|| format!("check-{i}"));
                 // Deep-link to the check detail page when we have the uuid (full
                 // API keys only — read-only keys omit it). Otherwise the list.
+                // With the uuid (full key) deep-link to the check's detail page.
+                // Read-only keys omit the uuid; bare /checks/ is not a route, so
+                // fall back to the site root (redirects a logged-in user to their
+                // checks) rather than a 404.
                 let detail_url = c
                     .uuid
                     .as_ref()
                     .map(|u| format!("{}/checks/{}/details/", self.base, u))
-                    .unwrap_or_else(|| format!("{}/checks/", self.base));
+                    .unwrap_or_else(|| format!("{}/", self.base));
                 Monitor {
                     name: c.name.unwrap_or_else(|| id.clone()),
                     status: map_status(&c.status),
