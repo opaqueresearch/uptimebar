@@ -5,7 +5,7 @@
 
 use tauri::{
     image::Image,
-    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
+    menu::{AboutMetadata, CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow,
 };
@@ -22,14 +22,30 @@ const POPOVER_W: f64 = 340.0;
 const POPOVER_H: f64 = 440.0;
 
 pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    let refresh = MenuItem::with_id(app, "refresh", "Refresh now", true, None::<&str>)?;
-    let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
+    // Accelerators follow macOS muscle memory: ⌘R refresh, ⌘, settings, ⌘Q quit.
+    let refresh = MenuItem::with_id(app, "refresh", "Refresh now", true, Some("CmdOrCtrl+R"))?;
+    let settings = MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
     let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
     let autostart =
         CheckMenuItem::with_id(app, "autostart", "Launch at login", true, autostart_on, None::<&str>)?;
+    // Native About panel (Apple HIG: About <App> shows version).
+    let about = PredefinedMenuItem::about(
+        app,
+        Some("About UptimeBar"),
+        Some(AboutMetadata {
+            name: Some("UptimeBar".into()),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
+            comments: Some("Menu-bar uptime notifier".into()),
+            ..Default::default()
+        }),
+    )?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit UptimeBar", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&refresh, &settings, &autostart, &sep, &quit])?;
+    let sep2 = PredefinedMenuItem::separator(app)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit UptimeBar", true, Some("CmdOrCtrl+Q"))?;
+    let menu = Menu::with_items(
+        app,
+        &[&refresh, &settings, &autostart, &sep, &about, &sep2, &quit],
+    )?;
 
     TrayIconBuilder::with_id("main")
         .icon(circle_icon(GRAY))

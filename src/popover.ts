@@ -173,6 +173,11 @@ async function refresh() {
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
+  // Esc dismisses the popover (Mac norm for transient panels, like Control Center).
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") invoke("close_popover");
+  });
+
   document.getElementById("refresh")?.addEventListener("click", () => invoke("refresh_now"));
   document.getElementById("settings")?.addEventListener("click", () => invoke("open_settings"));
   document.getElementById("group-toggle")?.addEventListener("click", () => {
