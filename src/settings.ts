@@ -6,6 +6,7 @@ interface ProviderConfig {
   label: string;
   base_url: string | null;
   interval_secs: number | null;
+  extra: string | null;
 }
 
 interface ProviderMeta {
@@ -18,6 +19,9 @@ interface ProviderMeta {
   requires_base_url: boolean;
   requires_secret: boolean;
   secret_label: string;
+  extra_label: string | null;
+  extra_placeholder: string;
+  extra_help: string;
 }
 
 let kinds: ProviderMeta[] = [];
@@ -99,6 +103,16 @@ function applyMeta(m: ProviderMeta) {
   const baseUsed = m.requires_base_url || m.default_base_url !== null;
   show("base-field", baseUsed);
   show("secret-field", m.requires_secret);
+
+  // Optional provider-specific field (e.g. BetterStack team slug).
+  if (m.extra_label) {
+    show("extra-field", true);
+    el("extra-label").textContent = m.extra_label;
+    el<HTMLInputElement>("extra").placeholder = m.extra_placeholder;
+    el("extra-help").textContent = m.extra_help;
+  } else {
+    show("extra-field", false);
+  }
   show("base-req", m.requires_base_url);
   show("secret-req", m.requires_secret && !editingId());
 
@@ -123,6 +137,7 @@ function onKindChange() {
   if (!m) return;
   el<HTMLInputElement>("label").value = m.name;
   el<HTMLInputElement>("base_url").value = m.default_base_url ?? "";
+  el<HTMLInputElement>("extra").value = "";
   clearResult();
   applyMeta(m);
 }
@@ -138,6 +153,7 @@ function formValues(): { config: ProviderConfig; secret: string } {
       label: el<HTMLInputElement>("label").value.trim(),
       base_url: el<HTMLInputElement>("base_url").value.trim() || null,
       interval_secs: intervalRaw ? parseInt(intervalRaw, 10) : null,
+      extra: el<HTMLInputElement>("extra").value.trim() || null,
     },
     secret: el<HTMLInputElement>("secret").value,
   };
@@ -176,6 +192,7 @@ function fillForm(p: ProviderConfig) {
   el<HTMLInputElement>("label").value = p.label;
   el<HTMLInputElement>("base_url").value = p.base_url ?? "";
   el<HTMLInputElement>("interval_secs").value = p.interval_secs?.toString() ?? "";
+  el<HTMLInputElement>("extra").value = p.extra ?? "";
   el<HTMLInputElement>("secret").value = "";
   hideSecret();
   el("form-title").textContent = `Edit ${p.label}`;
