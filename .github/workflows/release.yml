@@ -1,0 +1,76 @@
+name: Release
+
+# Builds installers for every platform and publishes them to a GitHub Release.
+# Triggered by pushing a version tag (e.g. v0.2.0). macOS builds are ad-hoc
+# signed (free, no Apple Developer account) so the signature is stable across
+# rebuilds — the prerequisite for the OS keychain to hold API keys reliably.
+#
+# To upgrade to a trusted (notarized) macOS build later, enroll in the Apple
+# Developer Program and add these repo secrets; tauri-action picks them up with
+# no workflow change: APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD,
+# APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID.
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Allow a manual run for testing the build without tagging.
+  workflow_dispatch:
+
+permissions:
+  contents: write # needed to create the GitHub Release
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest # Apple Silicon
+            target: aarch64-apple-darwin
+          - platform: macos-latest # Intel
+            target: x86_64-apple-darwin
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build, ad-hoc sign, and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Ad-hoc signing: "-" is the ad-hoc identity. No Apple account needed.
+          # Gives a stable signature so the keychain-backed secrets work; does
+          # NOT make Gatekeeper trust the app (users still right-click → Open).
+          APPLE_SIGNING_IDENTITY: ${{ startsWith(matrix.platform, 'macos') && '-' || '' }}
+        with:
+          args: --target ${{ matrix.target }}
+          # Create/update one Release per tag and attach this matrix leg's bundle.
+          tagName: ${{ github.ref_name }}
+          releaseName: "UptimeBar ${{ github.ref_name }}"
+          releaseBody: "See the assets below. macOS builds are ad-hoc signed (unsigned for Gatekeeper) — right-click → Open on first launch."
+          releaseDraft: true
+          prerelease: false
