@@ -1,6 +1,16 @@
-//! Persistence: non-secret config in `tauri-plugin-store`, API keys in the OS
-//! keychain via the `keyring` crate. Secrets are write-only from the UI — they
-//! go into the keychain and are never read back out to the frontend.
+//! Persistence: non-secret config in `tauri-plugin-store`. API keys are
+//! write-only from the UI — stored, never read back out to the frontend.
+//!
+//! Where keys live depends on the build:
+//! - **Release builds** use the OS keychain (macOS Keychain / Windows Credential
+//!   Manager) via the `keyring` crate — encrypted at rest, per-app access.
+//! - **Debug builds** (`tauri dev`) use a 0600 plaintext file. The keychain
+//!   binds each item to the app's code signature, so an unsigned dev build that
+//!   is recompiled can't read back what a previous build wrote — keys appeared
+//!   "not saved" after every rebuild. The file is reliable across rebuilds.
+//!
+//! On release, `get_secret` falls back to the file and migrates it into the
+//! keychain, so a user upgrading from a file-based build doesn't lose keys.
 
 use std::collections::HashMap;
 use std::fs;
@@ -18,6 +28,14 @@ const PROVIDERS_KEY: &str = "providers";
 const INTERVAL_KEY: &str = "poll_interval_secs";
 const BROWSER_KEY: &str = "browser_app";
 const SECRETS_FILE: &str = "secrets.json";
+
+/// Keychain service name (the app identifier); each provider id is an account.
+const KEYCHAIN_SERVICE: &str = "app.uptimebar";
+
+/// True when keys should live in the OS keychain (release builds only).
+fn use_keychain() -> bool {
+    !cfg!(debug_assertions)
+}
 
 pub const DEFAULT_INTERVAL_SECS: u64 = 60;
 
@@ -55,8 +73,17 @@ fn write_secrets(app: &AppHandle, map: &HashMap<String, String>) -> Result<(), S
     Ok(())
 }
 
+fn keychain_entry(id: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(KEYCHAIN_SERVICE, id).map_err(|e| e.to_string())
+}
+
 pub fn set_secret(app: &AppHandle, id: &str, secret: &str) -> Result<(), String> {
     let _guard = SECRETS_LOCK.lock().unwrap();
+    if use_keychain() {
+        return keychain_entry(id)?
+            .set_password(secret)
+            .map_err(|e| e.to_string());
+    }
     let mut map = read_secrets(app);
     map.insert(id.to_string(), secret.to_string());
     write_secrets(app, &map)
@@ -64,14 +91,40 @@ pub fn set_secret(app: &AppHandle, id: &str, secret: &str) -> Result<(), String>
 
 pub fn get_secret(app: &AppHandle, id: &str) -> Result<String, String> {
     let _guard = SECRETS_LOCK.lock().unwrap();
+    if use_keychain() {
+        match keychain_entry(id)?.get_password() {
+            Ok(s) => return Ok(s),
+            Err(keyring::Error::NoEntry) => {
+                // Migrate from a prior file-based build: read the file, move it
+                // into the keychain, and return it.
+                if let Some(s) = read_secrets(app).get(id).cloned() {
+                    if let Ok(entry) = keychain_entry(id) {
+                        let _ = entry.set_password(&s);
+                    }
+                    return Ok(s);
+                }
+                return Ok(String::new());
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    }
     Ok(read_secrets(app).get(id).cloned().unwrap_or_default())
 }
 
 pub fn delete_secret(app: &AppHandle, id: &str) -> Result<(), String> {
     let _guard = SECRETS_LOCK.lock().unwrap();
+    if use_keychain() {
+        match keychain_entry(id)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    // Always clear the file copy too (covers migrated entries / mode switches).
     let mut map = read_secrets(app);
-    map.remove(id);
-    write_secrets(app, &map)
+    if map.remove(id).is_some() {
+        write_secrets(app, &map)?;
+    }
+    Ok(())
 }
 
 pub fn load_configs(app: &AppHandle) -> Vec<ProviderConfig> {

@@ -58,16 +58,20 @@ Add a provider type by dropping a new file in `providers/`, adding a match arm i
 - **Provider errors map to Unknown, not Down**, after `FAILURE_THRESHOLD`
   consecutive failures — a flaky API never masquerades as an outage.
 - **Secrets are write-only from the UI** and are kept out of the synced config
-  store and out of git. They are **currently stored in a plaintext JSON file**
-  (`secrets.json`) in the app's local data dir, with `0600` (owner-only)
-  permissions — *not* encrypted, *not* in the OS keychain. This is a deliberate
-  workaround: the keychain binds each item to the app's code signature, so an
-  unsigned dev build can't read back what a previous rebuild wrote (keys
-  appeared to vanish after every recompile). The 0600 file survives rebuilds.
-  **Released (code-signed) builds SHOULD store secrets in the OS keychain**
-  (macOS Keychain / Windows Credential Manager) for encryption-at-rest and
-  per-app access control; the plaintext file should remain only as the
-  unsigned-dev fallback. See `config.rs` (`set_secret`/`get_secret`).
+  store and out of git. Where they live depends on the build:
+  - **Release builds** store keys in the **OS keychain** (macOS Keychain /
+    Windows Credential Manager) via the `keyring` crate — encrypted at rest,
+    per-app access. This requires a stable code signature; CI ad-hoc signs the
+    macOS builds (see below) so the keychain is reliable.
+  - **Debug builds** (`tauri dev`) use a `0600` (owner-only) plaintext file
+    (`secrets.json`) in the app data dir. The keychain binds each item to the
+    app's code signature, so an unsigned dev build can't read back what a
+    previous rebuild wrote (keys appeared to vanish after every recompile); the
+    file survives rebuilds.
+  - On release, `get_secret` falls back to the file and **migrates** it into the
+    keychain, so upgrading from an older file-based build doesn't lose keys.
+
+  See `config.rs` (`use_keychain` / `set_secret` / `get_secret`).
 
 ## Development
 
@@ -86,3 +90,24 @@ login / Quit.
 > **macOS notifications** are unreliable from unsigned `tauri dev` builds; test
 > them from a signed `.app`. **Windows toasts** require the installed NSIS/MSI
 > build (an AppUserModelID), not the raw dev exe.
+
+## Releases & signing
+
+Pushing a version tag (`git tag v0.2.0 && git push origin v0.2.0`) triggers
+`.github/workflows/release.yml`, which builds installers on hosted runners —
+macOS **aarch64 + x86_64** `.dmg` and Windows `.nsis` — and attaches them to a
+**draft** GitHub Release for that tag. (A Mac can't build the Windows installer
+and vice-versa; CI is how we produce both.)
+
+**Signing today (free, no Apple Developer account):** macOS builds are **ad-hoc
+signed** (`APPLE_SIGNING_IDENTITY: -`). This gives a *stable* signature — which
+is what makes the keychain-backed secret storage reliable — but does **not**
+make Gatekeeper trust the app. On first launch users must **right-click → Open**
+(or `xattr -dr com.apple.quarantine UptimeBar.app`).
+
+**Trusted (notarized) builds, later:** enroll in the Apple Developer Program
+($99/yr) and add these repo secrets — `tauri-action` uses them with no workflow
+change: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
+`APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`.
+Notarization is automated (minutes); there is **no App Store review** for a
+direct `.dmg` download.
