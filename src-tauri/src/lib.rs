@@ -1,3 +1,4 @@
+mod browser;
 mod commands;
 mod config;
 mod notify;
@@ -33,7 +34,11 @@ pub fn run() {
             commands::provider_has_secret,
             commands::refresh_now,
             commands::open_settings,
+            commands::close_popover,
             commands::open_url,
+            commands::get_browsers,
+            commands::get_browser_app,
+            commands::set_browser_app,
             commands::test_provider,
             commands::upsert_provider,
             commands::delete_provider,

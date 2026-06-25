@@ -9,12 +9,38 @@ use crate::config;
 use crate::providers::{self, ProviderConfig};
 use crate::state::{AppState, MonitorView};
 
-/// Open a URL in the user's default browser (used for provider API docs links).
+/// Open a URL in the user's chosen browser (monitor + docs links). Falls back to
+/// the system default when no browser is configured, or if launching the chosen
+/// one fails (e.g. it was uninstalled since being selected).
 #[tauri::command]
 pub fn open_url(app: AppHandle, url: String) -> Result<(), String> {
+    let chosen = config::browser_app(&app);
+    if !chosen.is_empty() {
+        if app.opener().open_url(&url, Some(chosen.as_str())).is_ok() {
+            return Ok(());
+        }
+        log::warn!("opening in '{chosen}' failed; falling back to system default");
+    }
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|e| e.to_string())
+}
+
+/// Browsers detected on this machine, for the settings dropdown.
+#[tauri::command]
+pub fn get_browsers() -> Vec<crate::browser::Browser> {
+    crate::browser::detect()
+}
+
+/// The currently chosen browser app name ("" = system default).
+#[tauri::command]
+pub fn get_browser_app(app: AppHandle) -> String {
+    config::browser_app(&app)
+}
+
+#[tauri::command]
+pub fn set_browser_app(app: AppHandle, value: String) -> Result<(), String> {
+    config::set_browser_app(&app, &value)
 }
 
 #[tauri::command]
@@ -46,9 +72,15 @@ pub fn refresh_now(state: State<AppState>) {
 
 #[tauri::command]
 pub fn open_settings(app: AppHandle) {
-    if let Some(win) = app.get_webview_window("settings") {
-        let _ = win.show();
-        let _ = win.set_focus();
+    // Single source of truth: center on the active monitor (see tray.rs).
+    crate::tray::open_settings(&app);
+}
+
+/// Dismiss the popover (hide, not destroy) — used by Esc.
+#[tauri::command]
+pub fn close_popover(app: AppHandle) {
+    if let Some(win) = app.get_webview_window("popover") {
+        let _ = win.hide();
     }
 }
 

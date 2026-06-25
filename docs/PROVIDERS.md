@@ -54,6 +54,11 @@ type; see [Deep-links](#click-to-open--deep-links).
   - **Full (read-write) key** — includes the `uuid`, so clicking deep-links to
     `/checks/<uuid>/details/`.
   - Use a **full key** if you want per-check links.
+- **Keys are shown only once.** Healthchecks reveals each key's value at creation
+  and then hides it; there's effectively one slot per type (read-only,
+  read-write, ping). If you set the read-only key and can no longer see it to
+  re-enter, just use the **read-write key** instead — it works for UptimeBar's
+  read-only polling and also enables per-check deep-links.
 
 ### Uptime Kuma
 - **Base URL:** the **full public status-page URL**, e.g.

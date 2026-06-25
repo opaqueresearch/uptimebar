@@ -15,9 +15,24 @@
   --accent-ring: rgba(59, 130, 246, 0.3);
   --radius: 8px;
   --radius-lg: 11px;
-  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='white' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   color-scheme: dark light;
+}
+
+/* Follow the macOS system appearance. Only the grayscale tokens flip; status
+   and accent hues stay constant so "red = down" reads the same in both modes. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #ffffff;
+    --bg-elev: #f2f2f5;
+    --bg-input: #ffffff;
+    --fg: #1d1d1f;
+    --muted: #6b6c75;
+    --border: #e2e2e6;
+    --border-strong: #c9cad1;
+    --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
 }
 
 * {
@@ -99,17 +114,35 @@ body.popover {
   padding: 2px 8px;
   width: auto;
 }
+/* Engaged filter ("Problems") reads as an applied state. */
+.mode-btn.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.mode-btn.active:hover {
+  background: var(--accent);
+  color: var(--accent-fg);
+  filter: brightness(1.08);
+}
 
 .group-header {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 9px 12px 4px;
+  padding: 5px 12px;
   font-size: 12px;
-}
-.group-header:not(:first-child) {
+  /* Faint elevated band — the native macOS sectioned-list idiom. Built from
+     themed tokens so it flips with light/dark automatically. */
+  background: var(--bg-elev);
   border-top: 1px solid var(--border);
-  margin-top: 4px;
+  border-bottom: 1px solid var(--border);
+  /* Pin the provider name while scrolling its group. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.group-header:first-child {
+  border-top: none;
 }
 .gh-dot {
   width: 8px;
@@ -119,6 +152,9 @@ body.popover {
 }
 .gh-label {
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
 }
 .gh-kind {
   color: var(--muted);
@@ -180,25 +216,21 @@ body.popover {
 body.settings {
   max-width: 540px;
   margin: 0 auto;
-  padding: 26px 24px 40px;
+  padding: 18px 24px 40px;
   -webkit-user-select: none;
   user-select: none;
 }
 
+/* The native window title bar ("UptimeBar Settings") is the page title; this is
+   just a one-line intro beneath it. */
 .app-header {
-  margin-bottom: 22px;
+  margin-bottom: 18px;
   padding: 0 4px;
-}
-.app-header h1 {
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  margin: 0;
 }
 .subtitle {
   color: var(--muted);
   font-size: 13px;
-  margin: 3px 0 0;
+  margin: 0;
 }
 
 /* Inset-grouped section (System Settings style) */
@@ -300,6 +332,12 @@ body.settings {
   padding: 11px 14px;
   position: relative;
 }
+/* `.form-row`'s explicit display overrides the default [hidden]{display:none},
+   so re-assert it — otherwise JS show()/hidden has no visual effect (e.g. the
+   BetterStack-only "Team" row would show for every provider). */
+.form-row[hidden] {
+  display: none;
+}
 .form-row + .form-row::before {
   content: "";
   position: absolute;
@@ -359,9 +397,13 @@ body.settings {
   padding: 0 10px;
   cursor: pointer;
 }
-.reveal-btn:hover {
+.reveal-btn:hover:not(:disabled) {
   color: var(--fg);
   border-color: var(--muted);
+}
+.reveal-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* Popup-button styled select */
@@ -444,6 +486,9 @@ body.settings {
   border-radius: 8px;
   font-size: 12.5px;
   border: 1px solid transparent;
+}
+.result[hidden] {
+  display: none;
 }
 .result-icon {
   font-weight: 700;
