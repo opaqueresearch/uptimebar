@@ -37,6 +37,11 @@ const providerId = (m: MonitorView) => m.key.slice(0, m.key.indexOf(":"));
 let current: MonitorView[] = [];
 let groupMode: "status" | "provider" =
   localStorage.getItem("uptimebar.group") === "provider" ? "provider" : "status";
+let filterMode: "all" | "problems" =
+  localStorage.getItem("uptimebar.filter") === "problems" ? "problems" : "all";
+
+// "Problems" = anything not healthy/paused: down or unknown (degraded/unreachable).
+const isProblem = (m: MonitorView) => m.status === "down" || m.status === "unknown";
 
 function monitorRow(m: MonitorView): HTMLLIElement {
   const li = document.createElement("li");
@@ -111,13 +116,7 @@ function draw() {
 
   list.innerHTML = "";
 
-  if (current.length === 0) {
-    empty.hidden = false;
-    summary.textContent = "No monitors";
-    return;
-  }
-  empty.hidden = true;
-
+  // Summary always reflects ALL monitors, even when the list is filtered.
   let up = 0;
   let down = 0;
   let unknown = 0;
@@ -126,19 +125,42 @@ function draw() {
     else if (m.status === "down") down++;
     else if (m.status === "unknown") unknown++;
   }
+
+  if (current.length === 0) {
+    empty.textContent = "No monitors yet. Open Settings to add a provider.";
+    empty.hidden = false;
+    summary.textContent = "No monitors";
+    return;
+  }
   summary.textContent =
     `${up} up · ${down} down` + (unknown ? ` · ${unknown} unknown` : "");
 
+  // Problems filter: render only down/unknown rows, but keep group counts honest.
+  const visible = filterMode === "problems" ? current.filter(isProblem) : current;
+
+  if (visible.length === 0) {
+    // Filtered to problems, but nothing is wrong — the best possible answer.
+    empty.textContent = "All systems operational ✓";
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+
   if (groupMode === "provider") {
-    const groups = new Map<string, { label: string; kind: string; items: MonitorView[] }>();
+    // Group on the full set (for accurate header counts), render visible rows.
+    const groups = new Map<
+      string,
+      { label: string; kind: string; items: MonitorView[]; shown: MonitorView[] }
+    >();
     for (const m of current) {
       const pid = providerId(m);
       let g = groups.get(pid);
       if (!g) {
-        g = { label: m.provider_label, kind: m.provider_kind, items: [] };
+        g = { label: m.provider_label, kind: m.provider_kind, items: [], shown: [] };
         groups.set(pid, g);
       }
       g.items.push(m);
+      if (filterMode === "all" || isProblem(m)) g.shown.push(m);
     }
     // Services with outages first, then alphabetical.
     const ordered = [...groups.values()].sort((a, b) => {
@@ -147,11 +169,12 @@ function draw() {
       return ad - bd || a.label.toLowerCase().localeCompare(b.label.toLowerCase());
     });
     for (const g of ordered) {
+      if (g.shown.length === 0) continue; // hide groups with nothing to show
       list.append(groupHeader(g.label, g.kind, g.items));
-      for (const m of [...g.items].sort(byStatusThenName)) list.append(monitorRow(m));
+      for (const m of [...g.shown].sort(byStatusThenName)) list.append(monitorRow(m));
     }
   } else {
-    for (const m of [...current].sort(byStatusThenName)) list.append(monitorRow(m));
+    for (const m of [...visible].sort(byStatusThenName)) list.append(monitorRow(m));
   }
 }
 
@@ -168,11 +191,25 @@ function updateToggleLabel() {
     groupMode === "provider" ? "Show a flat list (by status)" : "Group monitors by service";
 }
 
+function updateFilterLabel() {
+  const btn = document.getElementById("filter-toggle");
+  if (!btn) return;
+  const on = filterMode === "problems";
+  btn.textContent = on ? "Problems" : "All";
+  btn.title = on ? "Showing only down/degraded — click to show all" : "Show only down/degraded monitors";
+  btn.classList.toggle("active", on);
+}
+
 async function refresh() {
   setMonitors(await invoke<MonitorView[]>("get_monitors"));
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
+  // Esc dismisses the popover (Mac norm for transient panels, like Control Center).
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") invoke("close_popover");
+  });
+
   document.getElementById("refresh")?.addEventListener("click", () => invoke("refresh_now"));
   document.getElementById("settings")?.addEventListener("click", () => invoke("open_settings"));
   document.getElementById("group-toggle")?.addEventListener("click", () => {
@@ -181,8 +218,15 @@ window.addEventListener("DOMContentLoaded", async () => {
     updateToggleLabel();
     draw();
   });
+  document.getElementById("filter-toggle")?.addEventListener("click", () => {
+    filterMode = filterMode === "problems" ? "all" : "problems";
+    localStorage.setItem("uptimebar.filter", filterMode);
+    updateFilterLabel();
+    draw();
+  });
 
   updateToggleLabel();
+  updateFilterLabel();
   await refresh();
   await listen<MonitorView[]>("monitors:updated", (e) => setMonitors(e.payload));
 });

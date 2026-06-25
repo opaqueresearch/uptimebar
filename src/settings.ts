@@ -26,6 +26,12 @@ interface ProviderMeta {
 
 let kinds: ProviderMeta[] = [];
 
+// True while editing a provider that already has a saved key. The key value is
+// never sent to the frontend (secrets are write-only), so when this is true and
+// the field is empty there is nothing to reveal — the placeholder says "saved"
+// and the Show button is disabled until the user types a replacement.
+let editingHasSavedKey = false;
+
 function el<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
 }
@@ -138,6 +144,8 @@ function onKindChange() {
   el<HTMLInputElement>("label").value = m.name;
   el<HTMLInputElement>("base_url").value = m.default_base_url ?? "";
   el<HTMLInputElement>("extra").value = "";
+  editingHasSavedKey = false; // switching kind in the dropdown = a fresh entry
+  syncSecretField();
   clearResult();
   applyMeta(m);
 }
@@ -184,9 +192,29 @@ function hideSecret() {
   toggle.setAttribute("aria-label", "Show key");
 }
 
+/// Keep the key field's placeholder and the Show button honest about the three
+/// states: adding/no-key, editing-with-saved-key-and-empty, and typing a key.
+/// Called on load, on provider change, and as the field is edited.
+function syncSecretField() {
+  const input = el<HTMLInputElement>("secret");
+  const toggle = el<HTMLButtonElement>("secret-toggle");
+  const savedAndEmpty = editingHasSavedKey && input.value === "";
+
+  input.placeholder = savedAndEmpty
+    ? "•••••••••• — saved (leave blank to keep)"
+    : "Paste your key";
+
+  // Nothing to reveal when a saved key is hidden behind an empty field.
+  toggle.disabled = savedAndEmpty;
+  toggle.title = savedAndEmpty
+    ? "The saved key isn't shown here. Type a new key to replace it."
+    : "";
+  if (savedAndEmpty) hideSecret(); // re-mask in case it was revealed
+}
+
 // --- Provider list -----------------------------------------------------------
 
-function fillForm(p: ProviderConfig) {
+async function fillForm(p: ProviderConfig) {
   el<HTMLInputElement>("id").value = p.id;
   el<HTMLSelectElement>("kind").value = p.kind; // programmatic — no change event
   el<HTMLInputElement>("label").value = p.label;
@@ -195,6 +223,8 @@ function fillForm(p: ProviderConfig) {
   el<HTMLInputElement>("extra").value = p.extra ?? "";
   el<HTMLInputElement>("secret").value = "";
   hideSecret();
+  editingHasSavedKey = await invoke<boolean>("provider_has_secret", { id: p.id });
+  syncSecretField();
   el("form-title").textContent = `Edit ${p.label}`;
   el<HTMLButtonElement>("cancel").hidden = false;
   clearResult();
@@ -208,6 +238,7 @@ function resetForm() {
   el<HTMLInputElement>("id").value = "";
   el("form-title").textContent = "Add a provider";
   el<HTMLButtonElement>("cancel").hidden = true;
+  editingHasSavedKey = false;
   hideSecret();
   clearResult();
   onKindChange();
@@ -225,6 +256,37 @@ async function loadKinds() {
   }
   sel.addEventListener("change", onKindChange);
   onKindChange();
+}
+
+interface Browser {
+  name: string;
+  app: string;
+}
+
+/// Populate the "Open links in" dropdown with detected browsers and reflect the
+/// saved choice; persist on change.
+async function loadBrowsers() {
+  const browsers = await invoke<Browser[]>("get_browsers");
+  const current = await invoke<string>("get_browser_app");
+  const sel = el<HTMLSelectElement>("browser");
+  sel.innerHTML = "";
+  for (const b of browsers) {
+    const opt = document.createElement("option");
+    opt.value = b.app; // "" = system default
+    opt.textContent = b.name;
+    sel.append(opt);
+  }
+  // If a previously-chosen browser is no longer installed, fall back visually to
+  // the default (the backend already falls back at open time).
+  sel.value = browsers.some((b) => b.app === current) ? current : "";
+  sel.addEventListener("change", async () => {
+    try {
+      await invoke("set_browser_app", { value: sel.value });
+      toast("Browser preference saved.");
+    } catch (e) {
+      showResult("err", `Couldn't save: ${e}`);
+    }
+  });
 }
 
 async function loadProviders() {
@@ -319,6 +381,7 @@ async function loadProviders() {
 window.addEventListener("DOMContentLoaded", async () => {
   await loadKinds();
   await loadProviders();
+  await loadBrowsers();
 
   // Live validation + clear stale results as the user types.
   for (const id of ["label", "base_url", "secret", "interval_secs"]) {
@@ -327,6 +390,8 @@ window.addEventListener("DOMContentLoaded", async () => {
       updateSaveState();
     });
   }
+  // Typing a key (or clearing it) flips the placeholder/Show-button state.
+  el("secret").addEventListener("input", syncSecretField);
 
   el("test").addEventListener("click", async () => {
     const { config, secret } = formValues();
@@ -361,10 +426,12 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   el("cancel").addEventListener("click", resetForm);
 
-  // Reveal toggle so a pasted key can be verified before saving.
+  // Reveal toggle so a pasted key can be verified before saving. (Disabled when
+  // a saved key is hidden behind an empty field — there's nothing to reveal.)
   el<HTMLButtonElement>("secret-toggle").addEventListener("click", () => {
     const input = el<HTMLInputElement>("secret");
     const toggle = el<HTMLButtonElement>("secret-toggle");
+    if (toggle.disabled) return;
     const reveal = input.type === "password";
     input.type = reveal ? "text" : "password";
     toggle.textContent = reveal ? "Hide" : "Show";
