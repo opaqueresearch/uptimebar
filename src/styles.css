@@ -67,6 +67,11 @@ body.popover {
 .summary {
   font-weight: 600;
 }
+.summary .synced {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 11px;
+}
 
 .actions {
   display: flex;

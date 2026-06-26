@@ -52,6 +52,12 @@ pub async fn poll_once(app: &AppHandle) {
                         monitors,
                     ));
                 }
+                Ok(Err(crate::providers::ProviderError::RateLimited)) => {
+                    // Transient backpressure, not a check failure. Leave the last
+                    // good state intact (do NOT advance the failure counter, so a
+                    // 429 never escalates monitors to Unknown).
+                    log::warn!("provider {} rate-limited; keeping last state", p.display_name());
+                }
                 Ok(Err(e)) => {
                     log::warn!("provider {} fetch failed: {e}", p.display_name());
                     state.apply_failure(p.id());
