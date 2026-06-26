@@ -55,6 +55,29 @@ struct Check {
     unique_key: Option<String>,
     #[serde(default)]
     ping_url: Option<String>,
+    // Embeds the uuid; a fallback source when the top-level uuid is absent but
+    // these URLs are present. (Read-only keys redact all of them — then no
+    // per-check deep-link is possible; HC has no slug-based detail route.)
+    #[serde(default)]
+    update_url: Option<String>,
+}
+
+/// Pull a v4 UUID out of a Healthchecks URL (ping_url / update_url embed it),
+/// for keys that omit the top-level `uuid` but expose those URLs.
+fn uuid_from_url(url: Option<&str>) -> Option<String> {
+    let url = url?;
+    // Match the last path segment that looks like a UUID (8-4-4-4-12 hex).
+    url.rsplit('/')
+        .map(|seg| seg.trim_end_matches(|c: char| !c.is_ascii_hexdigit() && c != '-'))
+        .find(|seg| {
+            let parts: Vec<&str> = seg.split('-').collect();
+            parts.len() == 5
+                && [8, 4, 4, 4, 12]
+                    .iter()
+                    .zip(&parts)
+                    .all(|(n, p)| p.len() == *n && p.chars().all(|c| c.is_ascii_hexdigit()))
+        })
+        .map(String::from)
 }
 
 /// Healthchecks status: new / up / grace / down / paused.
@@ -108,17 +131,20 @@ impl Provider for Healthchecks {
                     .clone()
                     .or_else(|| c.unique_key.clone())
                     .unwrap_or_else(|| format!("check-{i}"));
-                // Deep-link to the check detail page when we have the uuid (full
-                // API keys only — read-only keys omit it). Otherwise the list.
-                // With the uuid (full key) deep-link to the check's detail page.
-                // Read-only keys omit the uuid; bare /checks/ is not a route, so
-                // fall back to the site root (redirects a logged-in user to their
-                // checks) rather than a 404.
-                let detail_url = c
+                // Deep-link to /checks/<uuid>/details/. The uuid comes from the
+                // top-level field (read-write keys) or, failing that, embedded in
+                // ping_url/update_url. Read-only keys redact ALL of these, so no
+                // per-check link is possible — fall back to the site root then
+                // (only the uuid route exists; /checks/<slug>/ is a 404).
+                let detail_id = c
                     .uuid
-                    .as_ref()
-                    .map(|u| format!("{}/checks/{}/details/", self.base, u))
-                    .unwrap_or_else(|| format!("{}/", self.base));
+                    .clone()
+                    .or_else(|| uuid_from_url(c.ping_url.as_deref()))
+                    .or_else(|| uuid_from_url(c.update_url.as_deref()));
+                let detail_url = match detail_id {
+                    Some(uuid) => format!("{}/checks/{}/details/", self.base, uuid),
+                    None => format!("{}/", self.base),
+                };
                 Monitor {
                     name: c.name.unwrap_or_else(|| id.clone()),
                     status: map_status(&c.status),
