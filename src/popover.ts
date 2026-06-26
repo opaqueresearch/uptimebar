@@ -38,30 +38,46 @@ function durationLabel(m: MonitorView): string | null {
   return null;
 }
 
-// Inline latency sparkline (SVG polyline) from per-bucket avg-ms history.
-function sparkline(history: number[]): SVGSVGElement | null {
+// Inline latency sparkline from per-bucket avg-ms history; buckets that had
+// failures get a red dot, mirroring the watch4.me dashboard's segment coloring.
+function sparkline(history: HistoryPoint[]): SVGSVGElement | null {
   if (history.length < 2) return null;
   const w = 56;
   const h = 14;
-  const min = Math.min(...history);
-  const max = Math.max(...history);
+  const vals = history.map((p) => p.avgMs);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
   const span = max - min || 1;
-  const pts = history
-    .map((v, i) => {
-      const x = (i / (history.length - 1)) * w;
-      const y = h - ((v - min) / span) * h; // higher latency = higher line
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
+  const xy = (i: number, v: number): [number, number] => [
+    (i / (history.length - 1)) * w,
+    h - ((v - min) / span) * h, // higher latency = higher line
+  ];
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
   svg.setAttribute("class", "spark");
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
   svg.setAttribute("width", String(w));
   svg.setAttribute("height", String(h));
+
   const line = document.createElementNS(ns, "polyline");
-  line.setAttribute("points", pts);
+  line.setAttribute(
+    "points",
+    history.map((p, i) => xy(i, p.avgMs).map((n) => n.toFixed(1)).join(",")).join(" "),
+  );
   svg.append(line);
+
+  // Mark failure buckets so an outage in the window is visible at a glance.
+  history.forEach((p, i) => {
+    if (p.failures > 0) {
+      const [cx, cy] = xy(i, p.avgMs);
+      const dot = document.createElementNS(ns, "circle");
+      dot.setAttribute("class", "spark-fail");
+      dot.setAttribute("cx", cx.toFixed(1));
+      dot.setAttribute("cy", cy.toFixed(1));
+      dot.setAttribute("r", "1.6");
+      svg.append(dot);
+    }
+  });
   return svg;
 }
 
@@ -97,10 +113,14 @@ const isProblem = (m: MonitorView) => m.status === "down" || m.status === "unkno
 // Tier-3 on-demand detail (latency, uptime %) keyed by monitor `key`. Populated
 // when the popover opens by fetching each provider's detail endpoint; absent for
 // providers without a detail tier.
+interface HistoryPoint {
+  avgMs: number;
+  failures: number; // >0 -> color that segment as a failure
+}
 interface Detail {
-  latencyMs?: number;
+  latencyMs?: number; // kept as a float (e.g. 906.26); rounded only at display
   uptimePct?: number;
-  history?: number[]; // per-bucket avg latency, for a sparkline
+  history?: HistoryPoint[];
 }
 const detail = new Map<string, Detail>();
 
@@ -131,7 +151,7 @@ function monitorRow(m: MonitorView): HTMLLIElement {
   else if (m.last_checked) parts.push(m.last_checked);
   // Tier-3 detail (latency, uptime), enriched on demand when popover opens.
   const det = detail.get(m.key);
-  if (det?.latencyMs != null) parts.push(`${det.latencyMs} ms`);
+  if (det?.latencyMs != null) parts.push(`${Math.round(det.latencyMs)} ms`);
   if (det?.uptimePct != null) parts.push(`${det.uptimePct.toFixed(det.uptimePct >= 100 ? 0 : 1)}%`);
   meta.textContent = parts.join(" · ");
 
@@ -314,16 +334,20 @@ async function loadDetail() {
         for (const md of monitors) {
           if (md?.id == null) continue;
           const key = `${pid}:${md.id}`;
-          // Field names verified against the live /api/v1/dashboard/ response.
+          // Field names + types per the Watch4.me dashboard contract.
+          // latest_response_time_ms is a FLOAT — keep it, round only at display.
           const d: Detail = {};
           if (typeof md.latest_response_time_ms === "number")
-            d.latencyMs = Math.round(md.latest_response_time_ms);
+            d.latencyMs = md.latest_response_time_ms;
           if (typeof md.uptime_pct === "number") d.uptimePct = md.uptime_pct;
           if (Array.isArray(md.response_history)) {
-            const buckets = md.response_history
-              .map((b: any) => (typeof b?.avg_ms === "number" ? b.avg_ms : null))
-              .filter((v: number | null): v is number => v != null);
-            if (buckets.length) d.history = buckets;
+            const pts: HistoryPoint[] = md.response_history
+              .filter((b: any) => typeof b?.avg_ms === "number")
+              .map((b: any) => ({
+                avgMs: b.avg_ms,
+                failures: typeof b.failures === "number" ? b.failures : 0,
+              }));
+            if (pts.length) d.history = pts;
           }
           if (d.latencyMs != null || d.uptimePct != null || d.history) detail.set(key, d);
         }
