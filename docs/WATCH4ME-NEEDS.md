@@ -122,6 +122,14 @@ provider — could light up UX the others can't. All optional/additive:
 - **Explicit degraded/unknown health** beyond binary `is_up` → makes UptimeBar's
   "Problems" (down + degraded) filter shine for Watch4.me specifically.
 
+### Attribution signal: the UptimeBar User-Agent
+
+UptimeBar sends `User-Agent: UptimeBar/<version>` (e.g. `UptimeBar/0.2.0`) on
+every request, so Watch4.me can already **identify and segment funnel traffic
+from the app**. A future UptimeBar enhancement will enrich this to include OS +
+arch (e.g. `UptimeBar/0.2.0 (macOS; aarch64)`) for finer analysis — worth
+logging/segmenting on the Watch4.me side.
+
 ---
 
 ## TL;DR for the Watch4.me team
@@ -130,3 +138,133 @@ If you do **one** thing: **add `public_id` to the `/api/v1/dashboard/`
 response.** One field, no UptimeBar changes, instantly upgrades every Watch4.me
 monitor click from "dump on dashboard" to "open the exact monitor" — better UX
 and a stronger funnel into the web app.
+
+---
+
+# Watch4.me team response (2026-06-26)
+
+Status of each ask, and a new purpose-built endpoint for UptimeBar to adopt.
+
+## What shipped
+
+### `GET /api/v1/monitors/status` — a lean, conditionally-cacheable status surface ✅ LIVE
+
+We built a dedicated endpoint for exactly UptimeBar's always-on polling use case,
+instead of having you keep polling `/api/v1/dashboard/`. It is **live in
+production now** and validated (200 + ETag, 304 conditional, rate-limit backstop,
+all fields incl. `public_id`).
+
+- Issue: watch4.me#706 · PR: watch4.me#709
+- Design rationale: `docs/design/desktop-app-conditional-polling.md` (in the
+  watch4.me repo) — why polling+ETag beats SSE for an always-on, ~0–5
+  events/day client.
+
+```
+GET https://watch4.me/api/v1/monitors/status
+Authorization: Bearer w4m_<token>
+If-None-Match: "<last etag>"        # optional; send the ETag from your last 200
+```
+
+**200 response** (carries `ETag` + `Cache-Control: no-cache`):
+
+```jsonc
+{
+  "monitors": [
+    {
+      "id": 123,                              // stable integer id
+      "public_id": "550e8400-e29b-41d4-...",  // UUID — deep-link target (now returned)
+      "name": "API",
+      "url": "https://api.example.com",       // null for non-HTTP monitor types
+      "is_up": true,
+      "is_paused": false,
+      "is_stale": false,                       // data too old -> show "Unknown"
+      "state_since": "2026-06-25T11:48:00Z",   // when the CURRENT state began (see below)
+      "latest_check_at": "2026-06-26T14:00:00Z"
+    }
+  ]
+}
+```
+
+**304 Not Modified**: empty body, carries the `ETag`. Means "nothing changed —
+reuse your cached list." This is the steady-state response and should be the vast
+majority of your polls.
+
+### Field contract (stable — build against these)
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | int | Stable integer id. |
+| `public_id` | string\|null | **UUID for deep-links** -> `https://watch4.me/monitors/<public_id>/`. |
+| `name` | string | Display name. |
+| `url` | string\|null | Monitored target; `null` for monitor types without a URL. |
+| `is_up` | bool | Up/down. |
+| `is_paused` | bool | Paused -> show Paused (takes precedence over up/down). |
+| `is_stale` | bool | Data too old (no recent checks) -> show **Unknown**, never Down. |
+| `state_since` | string\|null | ISO-8601 timestamp the **current** state began. Up: when it last came up. Down: when it last went down. Paused: `null`. |
+| `latest_check_at` | string\|null | Timestamp of the most recent check. **Advances every check.** |
+
+Status mapping is unchanged from what you already do:
+`is_paused` -> Paused; else `is_stale` -> Unknown; else `is_up` -> Up/Down.
+
+## How UptimeBar should use this
+
+### 1. Switch the provider to `/api/v1/monitors/status`
+Same Bearer auth you already use. The response is a strict subset of what you
+read today (we dropped only the rolling-window fields you don't consume), so the
+adapter change is small.
+
+### 2. Implement conditional polling (the whole point)
+- Cache the `ETag` and the last monitor list per provider.
+- Send `If-None-Match: <last_etag>` on every poll.
+- **Handle 304 *before* calling `.json()`** — a 304 has no body and will crash a
+  blind `.json()` decode. On 304, skip parsing and reuse the cached list (so your
+  diff logic finds no transition -> fires no notification, which is correct).
+- Because `fetch_monitors(&self)` is immutable and providers are shared as
+  `Arc<dyn Provider>`, the cached ETag + list need **interior mutability**
+  (`Mutex<Option<String>>` / `Mutex<Vec<Monitor>>`), or live in `AppState` keyed
+  by provider id — not plain `self.field = …` assignments.
+- First poll after app restart / config change sends no `If-None-Match`, gets a
+  full 200, and establishes a baseline with no spurious notifications (matches
+  today's first-poll behavior).
+
+### 3. Drive "down for Xm" from `state_since` (no extra request)
+`state_since` only changes on a real status flip, so it costs nothing against the
+304 rate. Compute duration locally: `now - state_since`. Do **not** expect a
+server-side `duration_seconds` — it would be stale between checks.
+
+### 4. Freshness display: use your own sync clock, not `latest_check_at`
+The ETag deliberately **excludes** `latest_check_at` (it advances every check and
+would near-zero the 304 hit rate). Consequence: during a long stable period you
+get 304s and won't see a new `latest_check_at`. Show freshness from your **own
+last-successful-sync clock** ("synced 12s ago") and rely on `is_stale` for
+"checks stopped" — not on the per-monitor `latest_check_at` string.
+
+### 5. Respect the rate-limit backstop
+There is a per-credential backstop of **1 request / 5 seconds**. Your 10s poll
+floor is comfortably clear of it, so it won't trip in normal operation. If you
+ever do get a `429`, back off — do **not** mark monitors Unknown on a 429 alone
+(treat it as transient, distinct from a real check failure).
+
+### 6. Keep `/api/v1/dashboard/` for the detail tier (two-tier model)
+This status endpoint is the cheap always-on tier. For latency, uptime %, and
+sparklines in the popover, fetch `/api/v1/dashboard/` **on demand when the
+popover opens** — not on every background poll. That keeps the always-on path
+cheap while still powering the rich detail view when a human is looking.
+
+## Status of your prioritized asks
+
+| Ask | Status |
+|---|---|
+| **P0 — `public_id` in response** | Done. Returned by `/monitors/status` (and added to `/dashboard/` in watch4.me#699). Deep-links work. |
+| **P0 — documented/versioned endpoint + stable field contract** | Done. `/api/v1/monitors/status` is a stable, decoupled contract (table above); independent of the dashboard's rolling-window internals so future dashboard changes can't silently break you. |
+| **P1 — list completeness / no pagination** | Guaranteed. The full list is always returned, never paginated/truncated. Size is bounded per user by plan limits. (If we ever add an unlimited tier we'll add an *opt-in* cursor; clients that send none keep getting full lists.) |
+| **P1 — one-click "Connect UptimeBar" token flow** | Tracked — watch4.me#710. |
+| **P2 — read-only token scope** | Tracked — watch4.me#710. `/monitors/status` is the read-only viewer surface these tokens will pair with. |
+| **P2 — richer per-monitor fields (latency, down-duration, status-change time)** | Addressed via the two-tier model. `state_since` gives you "down for Xm" on the status tier; latency/uptime/sparklines come from on-demand `/dashboard/` fetch. We intentionally did **not** put churning fields in the polled response (they'd destroy the 304 rate). |
+
+## Cross-repo follow-ups
+- **UptimeBar (this repo):** the client adoption above — switch endpoint, ETag
+  caching with interior mutability, 304 handling, `state_since`-driven duration,
+  two-tier popover fetch.
+- **watch4.me#710:** read-only token scope + self-serve token UI (one-click
+  "Connect UptimeBar"). Needed to remove the hand-paste-a-token funnel friction.
