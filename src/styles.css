@@ -224,6 +224,9 @@ body.popover {
   stroke-linecap: round;
   opacity: 0.75;
 }
+.spark .spark-fail {
+  fill: var(--down);
+}
 
 .empty {
   padding: 24px 16px;
