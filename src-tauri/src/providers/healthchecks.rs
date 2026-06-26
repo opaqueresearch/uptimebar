@@ -126,6 +126,7 @@ impl Provider for Healthchecks {
                     url: c.ping_url,
                     detail_url: Some(detail_url),
                     id,
+                    state_since: None,
                 }
             })
             .collect())

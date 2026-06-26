@@ -12,6 +12,30 @@ interface MonitorView {
   last_checked: string | null;
   url: string | null;
   detail_url: string | null;
+  state_since: string | null;
+}
+
+// Compact human duration since an ISO timestamp, e.g. "14m", "3h", "2d".
+function since(iso: string | null): string | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return null;
+  const secs = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  return `${Math.floor(hrs / 24)}d`;
+}
+
+// "down for Xm" / "up for Xh" from state_since, when the provider reports it.
+function durationLabel(m: MonitorView): string | null {
+  const d = since(m.state_since);
+  if (!d) return null;
+  if (m.status === "down") return `down for ${d}`;
+  if (m.status === "up") return `up for ${d}`;
+  return null;
 }
 
 // Per-service display name + accent color, so each row/group is identifiable.
@@ -43,6 +67,15 @@ let filterMode: "all" | "problems" =
 // "Problems" = anything not healthy/paused: down or unknown (degraded/unreachable).
 const isProblem = (m: MonitorView) => m.status === "down" || m.status === "unknown";
 
+// Tier-3 on-demand detail (latency, uptime %) keyed by monitor `key`. Populated
+// when the popover opens by fetching each provider's detail endpoint; absent for
+// providers without a detail tier.
+interface Detail {
+  latencyMs?: number;
+  uptimePct?: number;
+}
+const detail = new Map<string, Detail>();
+
 function monitorRow(m: MonitorView): HTMLLIElement {
   const li = document.createElement("li");
   li.className = "monitor";
@@ -63,7 +96,14 @@ function monitorRow(m: MonitorView): HTMLLIElement {
   const parts: string[] = [];
   // In a flat list, name the service per row; when grouped the header carries it.
   if (groupMode === "status") parts.push(kindName(m.provider_kind));
-  if (m.last_checked) parts.push(m.last_checked);
+  // Prefer "down for Xm" / "up for Xh" (from state_since) over a raw timestamp;
+  // it's the more useful signal and survives the ETag 304 steady state.
+  const dur = durationLabel(m);
+  if (dur) parts.push(dur);
+  else if (m.last_checked) parts.push(m.last_checked);
+  // Tier-3 detail (latency), enriched on demand when the popover opens.
+  const det = detail.get(m.key);
+  if (det?.latencyMs != null) parts.push(`${det.latencyMs} ms`);
   meta.textContent = parts.join(" · ");
 
   body.append(name, meta);
@@ -132,8 +172,16 @@ function draw() {
     summary.textContent = "No monitors";
     return;
   }
-  summary.textContent =
-    `${up} up · ${down} down` + (unknown ? ` · ${unknown} unknown` : "");
+  const counts = `${up} up · ${down} down` + (unknown ? ` · ${unknown} unknown` : "");
+  summary.textContent = counts;
+  // Own-clock freshness, shown subtly after the counts.
+  const synced = syncedLabel();
+  if (synced) {
+    const s = document.createElement("span");
+    s.className = "synced";
+    s.textContent = ` · ${synced}`;
+    summary.append(s);
+  }
 
   // Problems filter: render only down/unknown rows, but keep group counts honest.
   const visible = filterMode === "problems" ? current.filter(isProblem) : current;
@@ -180,7 +228,20 @@ function draw() {
 
 function setMonitors(monitors: MonitorView[]) {
   current = monitors;
+  lastSync = Date.now();
   draw();
+}
+
+// Own-clock freshness: the team's status endpoint excludes latest_check_at from
+// the ETag, so during 304 steady-state we show "synced Xs ago" from our own last
+// successful sync, not a per-monitor timestamp.
+let lastSync = 0;
+function syncedLabel(): string {
+  if (!lastSync) return "";
+  const secs = Math.floor((Date.now() - lastSync) / 1000);
+  if (secs < 5) return "synced just now";
+  if (secs < 60) return `synced ${secs}s ago`;
+  return `synced ${Math.floor(secs / 60)}m ago`;
 }
 
 function updateToggleLabel() {
@@ -202,6 +263,37 @@ function updateFilterLabel() {
 
 async function refresh() {
   setMonitors(await invoke<MonitorView[]>("get_monitors"));
+}
+
+// Tier-3: fetch rich detail (latency, uptime %) for each provider on demand and
+// merge it into `detail`, then redraw. Best-effort — failures are silent (the
+// always-on status tier already populated the list). Runs when the popover opens.
+async function loadDetail() {
+  const ids = new Set(current.map(providerId));
+  await Promise.all(
+    [...ids].map(async (pid) => {
+      try {
+        const data = await invoke<any>("get_provider_detail", { providerId: pid });
+        const monitors = data?.monitors;
+        if (!Array.isArray(monitors)) return;
+        for (const md of monitors) {
+          if (md?.id == null) continue;
+          const key = `${pid}:${md.id}`;
+          // Parse defensively — accept a few common field names.
+          const latencyMs =
+            md.response_time_ms ?? md.latency_ms ?? md.response_time ?? undefined;
+          const uptimePct = md.uptime_percentage ?? md.uptime ?? undefined;
+          const d: Detail = {};
+          if (typeof latencyMs === "number") d.latencyMs = Math.round(latencyMs);
+          if (typeof uptimePct === "number") d.uptimePct = uptimePct;
+          if (d.latencyMs != null || d.uptimePct != null) detail.set(key, d);
+        }
+      } catch {
+        // No detail tier / transient error — leave the status-only rows as-is.
+      }
+    }),
+  );
+  draw();
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -228,5 +320,11 @@ window.addEventListener("DOMContentLoaded", async () => {
   updateToggleLabel();
   updateFilterLabel();
   await refresh();
+  await loadDetail();
+  // The popover is hidden/shown (not reloaded); refresh detail each time a human
+  // brings it to the front, so latency/uptime are current when viewed.
+  window.addEventListener("focus", () => {
+    void loadDetail();
+  });
   await listen<MonitorView[]>("monitors:updated", (e) => setMonitors(e.payload));
 });
