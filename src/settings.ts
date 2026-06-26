@@ -400,8 +400,14 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (p && !(config.id && p.includes("API key"))) return showResult("err", p);
     showResult("info", "Testing connection…");
     try {
-      const count = await invoke<number>("test_provider", { config, secret });
-      showResult("ok", `Connected — found ${count} monitor${count === 1 ? "" : "s"}.`);
+      const res = await invoke<{ count: number; note: string | null }>("test_provider", {
+        config,
+        secret,
+      });
+      const base = `Connected — found ${res.count} monitor${res.count === 1 ? "" : "s"}.`;
+      // A note (e.g. Healthchecks read-only key) is advisory, not an error.
+      if (res.note) showResult("info", `${base} ${res.note}`);
+      else showResult("ok", base);
     } catch (e) {
       showResult("err", `${e}`);
     }
