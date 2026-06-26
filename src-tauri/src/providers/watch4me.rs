@@ -156,6 +156,7 @@ impl Provider for Watch4Me {
         // (a 304 has none — a blind .json() would error). No transition results,
         // so no spurious notification — which is correct.
         if status == reqwest::StatusCode::NOT_MODIFIED {
+            log::debug!("watch4me {}: 304 Not Modified (cache hit)", self.label);
             return Ok(self.cache.lock().unwrap().monitors.clone());
         }
 
