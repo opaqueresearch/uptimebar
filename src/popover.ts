@@ -38,6 +38,33 @@ function durationLabel(m: MonitorView): string | null {
   return null;
 }
 
+// Inline latency sparkline (SVG polyline) from per-bucket avg-ms history.
+function sparkline(history: number[]): SVGSVGElement | null {
+  if (history.length < 2) return null;
+  const w = 56;
+  const h = 14;
+  const min = Math.min(...history);
+  const max = Math.max(...history);
+  const span = max - min || 1;
+  const pts = history
+    .map((v, i) => {
+      const x = (i / (history.length - 1)) * w;
+      const y = h - ((v - min) / span) * h; // higher latency = higher line
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("class", "spark");
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.setAttribute("width", String(w));
+  svg.setAttribute("height", String(h));
+  const line = document.createElementNS(ns, "polyline");
+  line.setAttribute("points", pts);
+  svg.append(line);
+  return svg;
+}
+
 // Per-service display name + accent color, so each row/group is identifiable.
 const KIND_META: Record<string, { name: string; color: string }> = {
   watch4me: { name: "Watch4.me", color: "#3b82f6" },
@@ -73,6 +100,7 @@ const isProblem = (m: MonitorView) => m.status === "down" || m.status === "unkno
 interface Detail {
   latencyMs?: number;
   uptimePct?: number;
+  history?: number[]; // per-bucket avg latency, for a sparkline
 }
 const detail = new Map<string, Detail>();
 
@@ -101,13 +129,20 @@ function monitorRow(m: MonitorView): HTMLLIElement {
   const dur = durationLabel(m);
   if (dur) parts.push(dur);
   else if (m.last_checked) parts.push(m.last_checked);
-  // Tier-3 detail (latency), enriched on demand when the popover opens.
+  // Tier-3 detail (latency, uptime), enriched on demand when popover opens.
   const det = detail.get(m.key);
   if (det?.latencyMs != null) parts.push(`${det.latencyMs} ms`);
+  if (det?.uptimePct != null) parts.push(`${det.uptimePct.toFixed(det.uptimePct >= 100 ? 0 : 1)}%`);
   meta.textContent = parts.join(" · ");
 
   body.append(name, meta);
   li.append(dot, body);
+
+  // Latency sparkline (Tier-3), right-aligned, when history is available.
+  if (det?.history) {
+    const spark = sparkline(det.history);
+    if (spark) li.append(spark);
+  }
 
   if (m.detail_url) {
     const url = m.detail_url;
@@ -279,14 +314,18 @@ async function loadDetail() {
         for (const md of monitors) {
           if (md?.id == null) continue;
           const key = `${pid}:${md.id}`;
-          // Parse defensively — accept a few common field names.
-          const latencyMs =
-            md.response_time_ms ?? md.latency_ms ?? md.response_time ?? undefined;
-          const uptimePct = md.uptime_percentage ?? md.uptime ?? undefined;
+          // Field names verified against the live /api/v1/dashboard/ response.
           const d: Detail = {};
-          if (typeof latencyMs === "number") d.latencyMs = Math.round(latencyMs);
-          if (typeof uptimePct === "number") d.uptimePct = uptimePct;
-          if (d.latencyMs != null || d.uptimePct != null) detail.set(key, d);
+          if (typeof md.latest_response_time_ms === "number")
+            d.latencyMs = Math.round(md.latest_response_time_ms);
+          if (typeof md.uptime_pct === "number") d.uptimePct = md.uptime_pct;
+          if (Array.isArray(md.response_history)) {
+            const buckets = md.response_history
+              .map((b: any) => (typeof b?.avg_ms === "number" ? b.avg_ms : null))
+              .filter((v: number | null): v is number => v != null);
+            if (buckets.length) d.history = buckets;
+          }
+          if (d.latencyMs != null || d.uptimePct != null || d.history) detail.set(key, d);
         }
       } catch {
         // No detail tier / transient error — leave the status-only rows as-is.
