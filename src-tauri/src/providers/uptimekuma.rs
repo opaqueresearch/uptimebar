@@ -147,6 +147,7 @@ impl Provider for UptimeKuma {
                     last_checked: last.and_then(|h| h.time.clone()),
                     url: m.url,
                     detail_url: Some(page_url.clone()),
+                    state_since: None,
                 });
             }
         }

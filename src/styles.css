@@ -67,6 +67,11 @@ body.popover {
 .summary {
   font-weight: 600;
 }
+.summary .synced {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 11px;
+}
 
 .actions {
   display: flex;
@@ -204,6 +209,23 @@ body.popover {
 .monitor-meta {
   color: var(--muted);
   font-size: 11px;
+}
+/* Latency sparkline (Watch4.me detail tier). */
+.spark {
+  flex-shrink: 0;
+  margin-left: 8px;
+  align-self: center;
+}
+.spark polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.75;
+}
+.spark .spark-fail {
+  fill: var(--down);
 }
 
 .empty {

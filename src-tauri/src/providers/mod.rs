@@ -33,6 +33,10 @@ pub struct Monitor {
     pub url: Option<String>,
     /// A link into the provider's dashboard, for click-through.
     pub detail_url: Option<String>,
+    /// ISO-8601 timestamp the *current* status began, if the provider reports it.
+    /// Drives "down for Xm" / "up since…" in the UI (computed client-side).
+    #[serde(default)]
+    pub state_since: Option<String>,
 }
 
 /// Errors a provider fetch can produce. Each `Display` is written for the end
@@ -109,6 +113,13 @@ pub trait Provider: Send + Sync {
     fn display_name(&self) -> &str;
     /// The clean contract: current monitors with status + last-checked.
     async fn fetch_monitors(&self) -> Result<Vec<Monitor>, ProviderError>;
+
+    /// Optional rich detail (latency, uptime %, etc.) fetched on demand when the
+    /// popover opens — NOT on every background poll. Returns provider-native JSON
+    /// the frontend renders opportunistically; `None` means "no detail tier".
+    async fn fetch_detail(&self) -> Result<Option<serde_json::Value>, ProviderError> {
+        Ok(None)
+    }
 }
 
 /// Construct a provider from its config plus the secret pulled from the keychain.

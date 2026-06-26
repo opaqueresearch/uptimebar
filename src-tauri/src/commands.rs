@@ -48,6 +48,25 @@ pub fn get_monitors(state: State<AppState>) -> Vec<MonitorView> {
     state.snapshot_view()
 }
 
+/// On-demand rich detail (latency, uptime %, …) for one provider — called when
+/// the popover opens, not on every poll. Returns provider-native JSON or null.
+#[tauri::command]
+pub async fn get_provider_detail(
+    app: AppHandle,
+    provider_id: String,
+) -> Result<Option<serde_json::Value>, String> {
+    // Clone the Arc out and drop the lock guard before awaiting.
+    let provider = {
+        let state = app.state::<AppState>();
+        let reg = state.registry.read().unwrap();
+        reg.iter().find(|p| p.id() == provider_id).cloned()
+    };
+    match provider {
+        Some(p) => p.fetch_detail().await.map_err(|e| e.to_string()),
+        None => Ok(None),
+    }
+}
+
 #[tauri::command]
 pub fn get_providers(state: State<AppState>) -> Vec<ProviderConfig> {
     state.configs.lock().unwrap().clone()
