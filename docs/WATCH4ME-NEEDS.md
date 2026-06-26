@@ -268,3 +268,77 @@ cheap while still powering the rich detail view when a human is looking.
   two-tier popover fetch.
 - **watch4.me#710:** read-only token scope + self-serve token UI (one-click
   "Connect UptimeBar"). Needed to remove the hand-paste-a-token funnel friction.
+
+---
+
+## Watch4.me response to your live-testing findings (2026-06-26)
+
+Thanks for the field reports — both are accurate and useful. Verified against
+the server source.
+
+### Finding 1 — "the 304 didn't fire; I got a 200 with a new ETag"
+
+**Working as designed, not a missed optimization.** The status ETag is a hash of
+*state* fields only — `[id, name, url, is_up, is_paused, is_stale, state_since]`.
+It deliberately **excludes `latest_check_at`**, so a routine check that finds the
+same state does **not** flip the ETag. What *does* flip it is a real state change,
+including a flap captured via `state_since`.
+
+So the 304 rate tracks **how often your monitors change state**, not how often
+they're checked:
+
+- **Steady account** (nothing flapping): the vast majority of polls are 304s, as
+  intended. Steady state really is cheap.
+- **Busy/flapping account**: the ETag changes legitimately each time `state_since`
+  moves. A 200 there is *correct* — the state genuinely changed and you need the
+  new body. There's nothing to "fix"; a 304 would be wrong.
+
+One gotcha that can mimic "ETag won't settle": on a **freshly created** monitor,
+`state_since` and `latest_check_at` can coincide for the first checks while the
+monitor establishes its baseline. Once it's stable, `state_since` stops moving and
+the ETag stabilizes. If you tested seconds after adding monitors, that's likely
+what you saw. Your handling (304 → reuse cache, 200 → reparse) is exactly right
+either way — keep it.
+
+There is also a server-side **15s cache** on the row computation, so even a 200
+that you can't avoid costs us one cached read, not a fresh DB scan, per user per
+15s window.
+
+### Finding 2 — detail (`/dashboard/`) field names — confirmed, here's the contract
+
+Your discoveries are correct. The authoritative per-monitor schema in the
+`/api/v1/dashboard/` response (`monitors[]`) is:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | int | |
+| `public_id` | str \| null | deep-link id |
+| `name` | str | |
+| `type` | str | `"http"`, etc. |
+| `url` | str \| null | |
+| `is_up` / `is_paused` / `is_stale` | bool | |
+| `check_interval_seconds` | int | |
+| `uptime_pct` | float \| null | **not** `uptime_percentage`/`uptime` |
+| `latest_response_time_ms` | **float** \| null | **not** `response_time_ms`/`latency_ms`. It's a float (e.g. `906.26`) — don't bind it to an int. |
+| `latest_check_at` | str (ISO-8601) \| null | |
+| `response_history` | `ResponseHistoryPoint[]` | hourly buckets — real sparkline data |
+
+`ResponseHistoryPoint`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `bucket` | str (ISO-8601) \| null | bucket start |
+| `avg_ms` | float \| null | |
+| `min_ms` | float \| null | |
+| `max_ms` | float \| null | |
+| `failures` | int | count in bucket; drives per-segment red/green coloring |
+
+Good catch capturing `response_history` — that *is* the sparkline source the
+watch4.me dashboard itself renders from, so you get the same data the web UI uses.
+Note `latest_response_time_ms` being a float is load-bearing: we hit an HTTP 500
+on the JSON path once for exactly this reason (pydantic rejecting `906.26` for an
+int field), so bind it as a float on your side too.
+
+These dashboard field names are stable, but they live on the **detail tier** —
+keep fetching them on demand (popover open / explicit refresh), not on the poll
+loop, so the 304 economics above stay intact.

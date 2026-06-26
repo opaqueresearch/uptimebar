@@ -33,6 +33,9 @@ pub struct MonitorView {
     pub last_checked: Option<String>,
     pub url: Option<String>,
     pub detail_url: Option<String>,
+    /// ISO-8601 when the current status began, if known. The UI computes
+    /// "down for Xm" / "up since…" from this against its own clock.
+    pub state_since: Option<String>,
 }
 
 /// Aggregate counts used to drive the tray icon + tooltip.
@@ -185,6 +188,7 @@ impl AppState {
                 last_checked: r.monitor.last_checked.clone(),
                 url: r.monitor.url.clone(),
                 detail_url: r.monitor.detail_url.clone(),
+                state_since: r.monitor.state_since.clone(),
             })
             .collect();
         // Down first, then unknown, paused, up; alphabetical within.

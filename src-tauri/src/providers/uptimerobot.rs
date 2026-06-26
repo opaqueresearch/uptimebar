@@ -109,6 +109,7 @@ impl Provider for UptimeRobot {
                 last_checked: None,
                 url: m.url,
                 detail_url: Some("https://dashboard.uptimerobot.com/monitors".to_string()),
+                state_since: None,
             })
             .collect())
     }

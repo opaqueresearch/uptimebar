@@ -140,6 +140,7 @@ impl Provider for BetterStack {
                     }),
                     name,
                     id: item.id,
+                    state_since: None,
                 }
             })
             .collect())
