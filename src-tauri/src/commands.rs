@@ -103,6 +103,14 @@ pub fn close_popover(app: AppHandle) {
     }
 }
 
+/// Result of a "Test connection": how many monitors, plus an optional advisory
+/// note (e.g. a Healthchecks read-only key that disables per-check deep-links).
+#[derive(serde::Serialize)]
+pub struct TestResult {
+    pub count: usize,
+    pub note: Option<String>,
+}
+
 /// Build a provider ad-hoc and run a single fetch — used by the "Test
 /// connection" button before committing config.
 #[tauri::command]
@@ -110,7 +118,7 @@ pub async fn test_provider(
     app: AppHandle,
     mut config: ProviderConfig,
     secret: String,
-) -> Result<usize, String> {
+) -> Result<TestResult, String> {
     let http = app.state::<AppState>().http.clone();
 
     // The key field is blank when editing an existing provider (secrets are
@@ -126,7 +134,35 @@ pub async fn test_provider(
     }
     let provider = providers::build(&config, secret, http).map_err(|e| e.to_string())?;
     let monitors = provider.fetch_monitors().await.map_err(|e| e.to_string())?;
-    Ok(monitors.len())
+
+    // Healthchecks read-only keys redact the uuid (and ping_url/update_url), so
+    // no monitor gets a per-check deep-link — every detail_url is just the base.
+    // Detect that and advise the user to use the read-write key for links.
+    let note = if config.kind == "healthchecks" && !monitors.is_empty() {
+        let base = config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://healthchecks.io")
+            .trim_end_matches('/');
+        let none_deeplink = monitors
+            .iter()
+            .all(|m| !m.detail_url.as_deref().is_some_and(|u| u.contains("/checks/")));
+        if none_deeplink {
+            Some(format!(
+                "Read-only key detected — per-check links go to the dashboard. \
+                 Use the read-write API key ({base}) for per-check deep-links."
+            ))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    Ok(TestResult {
+        count: monitors.len(),
+        note,
+    })
 }
 
 #[tauri::command]
