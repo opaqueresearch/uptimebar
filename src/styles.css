@@ -39,6 +39,12 @@
   box-sizing: border-box;
 }
 
+/* Paint the whole window backing opaque, so when settings content scrolls it
+   never shows through the (centered, max-width) body or under the title bar. */
+html {
+  background: var(--bg);
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -248,6 +254,30 @@ body.settings {
 .app-header {
   margin-bottom: 18px;
   padding: 0 4px;
+}
+
+/* Collapsed "Add a provider" trigger — a full-width card-height button. */
+.add-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+.add-trigger:hover {
+  background: var(--bg-elev);
+}
+.add-trigger-plus {
+  font-size: 16px;
+  line-height: 1;
+  font-weight: 600;
 }
 .subtitle {
   color: var(--muted);

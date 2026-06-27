@@ -34,7 +34,16 @@
       </div>
     </section>
 
-    <section class="group">
+    <!-- Collapsed trigger shown when the add/edit form is closed. -->
+    <section class="group" id="add-trigger-group">
+      <div class="card">
+        <button type="button" id="add-trigger" class="add-trigger">
+          <span class="add-trigger-plus">+</span> Add a provider
+        </button>
+      </div>
+    </section>
+
+    <section class="group" id="form-group" hidden>
       <h2 class="group-title" id="form-title">Add Provider</h2>
       <div class="card">
         <form id="provider-form" novalidate>
