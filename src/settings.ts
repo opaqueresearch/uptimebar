@@ -212,9 +212,24 @@ function syncSecretField() {
   if (savedAndEmpty) hideSecret(); // re-mask in case it was revealed
 }
 
+// --- Add/edit form collapse --------------------------------------------------
+
+/// Show the add/edit form and hide the collapsed "Add a provider" trigger.
+function openForm() {
+  show("form-group", true);
+  show("add-trigger-group", false);
+}
+
+/// Collapse the form back to the trigger button.
+function collapseForm() {
+  show("form-group", false);
+  show("add-trigger-group", true);
+}
+
 // --- Provider list -----------------------------------------------------------
 
 async function fillForm(p: ProviderConfig) {
+  openForm();
   el<HTMLInputElement>("id").value = p.id;
   el<HTMLSelectElement>("kind").value = p.kind; // programmatic — no change event
   el<HTMLInputElement>("label").value = p.label;
@@ -242,6 +257,21 @@ function resetForm() {
   hideSecret();
   clearResult();
   onKindChange();
+  collapseForm();
+}
+
+/// Open a blank "Add a provider" form (from the collapsed trigger).
+function startAdd() {
+  el<HTMLFormElement>("provider-form").reset();
+  el<HTMLInputElement>("id").value = "";
+  el("form-title").textContent = "Add a provider";
+  el<HTMLButtonElement>("cancel").hidden = false;
+  editingHasSavedKey = false;
+  hideSecret();
+  clearResult();
+  onKindChange();
+  openForm();
+  el("provider-form").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function loadKinds() {
@@ -287,6 +317,29 @@ async function loadBrowsers() {
       showResult("err", `Couldn't save: ${e}`);
     }
   });
+}
+
+/// Test a saved provider straight from its list row, using the stored key (the
+/// backend falls back to the keychain when the passed secret is empty). Gives
+/// quick feedback without opening the edit form and scrolling to Test.
+async function testRow(p: ProviderConfig, btn: HTMLButtonElement) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Testing…";
+  try {
+    const res = await invoke<{ count: number; note: string | null }>("test_provider", {
+      config: p,
+      secret: "",
+    });
+    const msg = `“${p.label}”: ${res.count} monitor${res.count === 1 ? "" : "s"}`;
+    if (res.note) toast(`${msg} — ${res.note}`);
+    else toast(`${msg} ✓`);
+  } catch (e) {
+    toast(`“${p.label}” failed: ${e}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
 }
 
 async function loadProviders() {
@@ -339,11 +392,13 @@ async function loadProviders() {
     function showDefault() {
       if (revertTimer) clearTimeout(revertTimer);
       btns.innerHTML = "";
+      const test = mkBtn("Test", "");
+      test.addEventListener("click", () => testRow(p, test));
       const edit = mkBtn("Edit", "");
       edit.addEventListener("click", () => fillForm(p));
       const del = mkBtn("Remove", "");
       del.addEventListener("click", showConfirm);
-      btns.append(edit, del);
+      btns.append(test, edit, del);
     }
 
     function showConfirm() {
@@ -431,6 +486,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   el("cancel").addEventListener("click", resetForm);
+  el("add-trigger").addEventListener("click", startAdd);
 
   // Reveal toggle so a pasted key can be verified before saving. (Disabled when
   // a saved key is hidden behind an empty field — there's nothing to reveal.)
