@@ -21,7 +21,7 @@ Baseline = **Watch4.me** (we have a live token; all ✅).
 | Capability | Watch4.me | UptimeRobot | BetterStack | Uptime Kuma (status-page) | Healthchecks.io |
 |---|---|---|---|---|---|
 | **Current latency** | ✅ `latest_response_time_ms` | ✅ `average_response_time` | ⚠️ per-monitor call | ✅ heartbeat `ping` | ⚠️ run-time only |
-| **Latency history (sparkline)** | ✅ `response_history[]` (1 call) | ⚠️ `response_times=1`; free=24h | ⚠️ `/response-times` 24h, **N+1** | ✅ `heartbeatList` (≤100 pts) | ⚠️ `/pings/` run-time, RW key |
+| **Latency history (sparkline)** | ✅ `response_history[]` (1 call) | ❌ **free = 1 point only** (live-verified); Pro? | ⚠️ `/response-times` 24h, **N+1** | ✅ `heartbeatList` (≤100 pts) | ⚠️ `/pings/` run-time, RW key |
 | **Uptime %** | ✅ `uptime_pct` | ✅ `custom_uptime_ratios` | ✅ `/sla` (N+1) | ⚠️ 24h only (`uptimeList`) | ❌ none (compute from flips) |
 | **Status-change time ("down for Xm")** | ✅ `state_since` (1 call) | ✅ `logs=1` | ⚠️ via `/incidents` v3 (N+1) | ✅ derive from heartbeats | ✅ `/flips/` (even read-only) |
 | **Per-monitor deep-link** | ✅ `public_id` | ⚠️ build from `id` (unofficial) | ❌ team slug not in API | ❌ status page only | ⚠️ uuid → RW key only |
@@ -37,10 +37,22 @@ Baseline = **Watch4.me** (we have a live token; all ✅).
 
 ## The honest strategic read
 
-**Most per-monitor *capabilities* are NOT unique to Watch4.me.** Latency, uptime,
-and status-timing exist almost everywhere in some form. If we framed "sparklines
-are a Watch4.me thing," it would be **false** — UptimeRobot, Uptime Kuma, and
-BetterStack can all feed a sparkline. Do **not** build that contrast.
+**Most per-monitor *capabilities* are NOT unique to Watch4.me.** Uptime and
+status-timing exist almost everywhere. **Latency *history* (sparklines) is the
+exception and is more nuanced than first thought** (live-verified 2026-06-27):
+- **UptimeRobot free tier: effectively NO series** — the live API returned a
+  single response-time point even with a 24h range. So a real sparkline is *not*
+  free-tier viable on UptimeRobot (the prime migrant pool). Its public status
+  page has 90-day *uptime* history but **no latency** either.
+- **BetterStack:** 24h only, **N+1** (a call per monitor) — costly.
+- **Uptime Kuma:** genuinely has ≤100-point ping history (a real sparkline).
+- **Healthchecks:** only job run-time, RW key, per-check call — not HTTP latency.
+
+So a defensible nuanced line: **"latency sparklines, free and effortless"** is
+close to a real Watch4.me edge — only self-hosted Uptime Kuma matches it cheaply;
+UptimeRobot free can't, BetterStack pays N+1, Healthchecks doesn't have it. Still
+**don't** claim "only Watch4.me has sparklines" (Kuma does) — frame it as *free +
+one-call + no-setup*, which IS distinctive.
 
 **Watch4.me's genuine, defensible differentiators are architectural, not feature-checkboxes:**
 
@@ -99,14 +111,35 @@ strategy (#5) explicitly targets. Our app must accept a custom base URL for them
 
 ## Per-provider detail (evidence)
 
-### UptimeRobot — `POST /v2/getMonitors`
-- Latency: `response_times=1` → `{datetime,value}` series; `response_times_average` downsamples. **Free ≈ last 24h; Pro up to 12 mo (7-day windows).** Current: `average_response_time`.
-- Uptime: `custom_uptime_ratios=7-30-45`, `all_time_uptime_ratio`.
-- Status-change: `logs=1` → entries `{type(1=down,2=up,99=paused), datetime, duration}`. Most recent down = outage start.
-- Deep-link: stable numeric `id` + target `url`, but **no documented dashboard URL field** — link format unofficial.
-- Actions: `editMonitor` pause/resume (`status` 0/1, needs RW key). **No mute, no ack.**
-- Polling: **no ETag/304**; outbound alert webhooks only. Rate limit **free 10/min**, Pro up to 5000/min, 429 + `Retry-After`.
-- v3 API exists but param/field parity **unverified (needs account)**.
+### UptimeRobot — `POST /v2/getMonitors` — ✅ LIVE-VERIFIED (free tier, read-only key, 2026-06-27)
+- **One call returns everything** the app needs: monitor `id`, `friendly_name`,
+  `url`, `status`, `average_response_time`, `custom_uptime_ratio`,
+  `all_time_uptime_ratio`, `response_times`, `logs`. Read-only key works for all reads. ✅
+- Latency **current**: `average_response_time` (e.g. `372.000`). ✅
+- Latency **history (sparkline)**: ⚠️ **WEAKER than docs implied.** With
+  `response_times=1` AND an explicit 24h `response_times_start_date/end_date`,
+  the free tier returned **exactly ONE point** (the latest). So on free tier
+  there is effectively **no usable response-time *series*** — current value only.
+  (Pro reportedly retains history; **unverified — needs Pro**.) → A real sparkline
+  is **not** free-tier viable here.
+- Uptime: ✅ `custom_uptime_ratios=1-7-30` → `"100.000-100.000-100.000"`;
+  `all_time_uptime_ratio` works. Free tier. ✅
+- Status-change ("down for Xm"): `logs=1` → `{type,datetime,duration}`. Live monitor
+  returned `logs: []` (brand-new, no events yet) — **mechanism documented, empty
+  until events occur; revisit once the monitor has history.** ⚠️
+- Deep-link: stable numeric `id` + target `url`; **no dashboard URL field** — unofficial. ⚠️
+- Actions: `editMonitor` pause/resume (RW key). No mute/ack.
+- Polling: **no ETag/304**; rate limit free 10/min.
+
+**Public status page JSON (NO key) — bonus finding.** A user's public status page
+(`stats.uptimerobot.com/<id>`) exposes, unauthenticated, via
+`GET stats.uptimerobot.com/api/getMonitorList/<pageId>`:
+- per-monitor `dailyRatios` (**90 days** of daily uptime %), `30dRatio`,
+  `90dRatio`, `ratio`, `lastDowntime`, `statusClass`, `name`, `monitorId`,
+  plus top-level `statistics.counts {up,down,paused,total}`.
+- **Uptime history is richer here than the free authed API** (90 daily points).
+- **But NO response-time/latency** anywhere → still no sparkline source.
+- Only exists if the user created a public status page; not a general path.
 
 ### BetterStack — `/api/v2/monitors` (+ v3 incidents)
 - Latency: `GET /monitors/{id}/response-times` (per-region series, **24h, ~30s, no range params**). **N+1.**
