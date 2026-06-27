@@ -360,9 +360,19 @@ async function loadDetail() {
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
-  // Esc dismisses the popover (Mac norm for transient panels, like Control Center).
+  // Keyboard shortcuts while the popover is focused. The tray-menu accelerators
+  // (⌘,/⌘R) only fire when the menu has context, not when this webview is front,
+  // so handle them here too.
   window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") invoke("close_popover");
+    if (e.key === "Escape") {
+      invoke("close_popover");
+    } else if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+      e.preventDefault();
+      invoke("open_settings");
+    } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "r") {
+      e.preventDefault();
+      invoke("refresh_now");
+    }
   });
 
   document.getElementById("refresh")?.addEventListener("click", () => invoke("refresh_now"));
