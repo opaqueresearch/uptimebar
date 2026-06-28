@@ -21,10 +21,10 @@ Baseline = **Watch4.me** (we have a live token; all ✅).
 | Capability | Watch4.me | UptimeRobot | BetterStack | Uptime Kuma (status-page) | Healthchecks.io |
 |---|---|---|---|---|---|
 | **Current latency** | ✅ `latest_response_time_ms` | ✅ `average_response_time` | ⚠️ per-monitor call | ✅ heartbeat `ping` | ⚠️ run-time only |
-| **Latency history (sparkline)** | ✅ `response_history[]` (1 call) | ❌ **free = 1 point only** (live-verified); Pro? | ⚠️ `/response-times` 24h, **N+1** | ✅ `heartbeatList` (≤100 pts) | ⚠️ `/pings/` run-time, RW key |
+| **Latency history (sparkline)** | ✅ `response_history[]` (1 call) | ✅ `response_times[]` (~194 pts/24h, 1 call) — **free, re-verified 2026-06-28** | ⚠️ `/response-times` 24h, **N+1** | ✅ `heartbeatList` (≤100 pts) | ⚠️ `/pings/` run-time, RW key |
 | **Uptime %** | ✅ `uptime_pct` | ✅ `custom_uptime_ratios` | ✅ `/sla` (N+1) | ⚠️ 24h only (`uptimeList`) | ❌ none (compute from flips) |
 | **Status-change time ("down for Xm")** | ✅ `state_since` (1 call) | ✅ `logs=1` | ⚠️ via `/incidents` v3 (N+1) | ✅ derive from heartbeats | ✅ `/flips/` (even read-only) |
-| **Per-monitor deep-link** | ✅ `public_id` | ⚠️ build from `id` (unofficial) | ❌ team slug not in API | ❌ status page only | ⚠️ uuid → RW key only |
+| **Per-monitor deep-link** | ✅ `public_id` | ✅ `/monitors/<id>` (unofficial route, verified) | ❌ team slug not in API | ❌ status page only | ⚠️ uuid → RW key only |
 | **Remote pause/resume** | ❓ (#710 pending) | ✅ `editMonitor status` | ✅ `PATCH paused` | ❌ (needs auth Socket.IO) | ✅ `/pause` `/resume` |
 | **Remote mute/ack** | ❓ (#710 pending) | ❌ | ⚠️ incident ack (not mute) | ❌ | ❌ |
 | **Conditional polling (ETag/304)** | ✅ | ❌ | ❌ | ❌ (1-min server cache) | ❌ |
@@ -38,21 +38,26 @@ Baseline = **Watch4.me** (we have a live token; all ✅).
 ## The honest strategic read
 
 **Most per-monitor *capabilities* are NOT unique to Watch4.me.** Uptime and
-status-timing exist almost everywhere. **Latency *history* (sparklines) is the
-exception and is more nuanced than first thought** (live-verified 2026-06-27):
-- **UptimeRobot free tier: effectively NO series** — the live API returned a
-  single response-time point even with a 24h range. So a real sparkline is *not*
-  free-tier viable on UptimeRobot (the prime migrant pool). Its public status
-  page has 90-day *uptime* history but **no latency** either.
+status-timing exist almost everywhere. **Latency *history* (sparklines) is more
+nuanced — and an earlier finding here was WRONG, corrected 2026-06-28:**
+- **UptimeRobot free tier: real series available** — `response_times=1` WITHOUT
+  an explicit date range returns the full retained window (**~194 points / ~24h**
+  at 5-min buckets), live-re-verified. A real sparkline IS free-tier viable.
+  ⚠️ The prior "1 point only" finding came from passing explicit
+  `response_times_start_date/end_date` — *those params* truncate it; omit them and
+  you get the whole series. **Caveat:** `value` is integer ms; series carries no
+  per-bucket failure flag (failed checks are simply omitted), so its sparkline has
+  no red failure dots (Watch4.me's `response_history` does).
 - **BetterStack:** 24h only, **N+1** (a call per monitor) — costly.
 - **Uptime Kuma:** genuinely has ≤100-point ping history (a real sparkline).
 - **Healthchecks:** only job run-time, RW key, per-check call — not HTTP latency.
 
-So a defensible nuanced line: **"latency sparklines, free and effortless"** is
-close to a real Watch4.me edge — only self-hosted Uptime Kuma matches it cheaply;
-UptimeRobot free can't, BetterStack pays N+1, Healthchecks doesn't have it. Still
-**don't** claim "only Watch4.me has sparklines" (Kuma does) — frame it as *free +
-one-call + no-setup*, which IS distinctive.
+So sparklines are **less of a differentiator than first thought** — Watch4.me,
+UptimeRobot, and Uptime Kuma all do a real one. **Do NOT lean on "we have
+sparklines"** as a contrast. Watch4.me's *honest* edges remain (a) the whole fleet
+in **one cheap ETag/304 call** (UptimeRobot pays a full re-fetch each poll; this
+is the durable architectural win), and (b) sparklines with **per-bucket failure
+markers** (the `failures` field) — a fidelity detail UptimeRobot's series lacks.
 
 **Watch4.me's genuine, defensible differentiators are architectural, not feature-checkboxes:**
 
@@ -64,18 +69,88 @@ one-call + no-setup*, which IS distinctive.
 2. **Conditional polling (ETag/304) — unique to Watch4.me.** Every other provider
    is full-fetch-every-poll. This is a true, verifiable "only Watch4.me" trait.
 3. **Deep-links that just work.** Watch4.me `public_id` → specific monitor page,
-   no caveats. BetterStack **can't** (slug not in API). Healthchecks needs a
-   read-write key. UptimeRobot has no official dashboard URL. Uptime Kuma has no
-   per-monitor page at all. **This is the cleanest honest contrast.**
+   no caveats and via an official id. BetterStack **can't** (slug not in API).
+   Healthchecks needs a read-write key. UptimeRobot links per-monitor only via an
+   *unofficial* (undocumented) dashboard route. Uptime Kuma has no per-monitor
+   page at all. So the honest contrast is now **"first-class/official vs.
+   caveated"** — Watch4.me's is the only documented, no-asterisk one; the others
+   each carry a caveat (missing, RW-key-gated, or unofficial).
 4. **Read-only-friendly full fidelity.** Watch4.me gives everything to a simple
    Bearer token; Healthchecks cripples read-only keys, BetterStack has no
    read-only scope.
 
 **Per-provider honest one-liners (safe to use in UI/marketing):**
-- **UptimeRobot** — capable API, but no official per-monitor deep-link and free tier is 10 req/min + 24h response-time history.
+- **UptimeRobot** — capable: one call gives latency, 30d uptime %, AND a ~24h latency series (real sparkline) on free tier; per-monitor deep-link works via an unofficial route. Weaknesses vs Watch4.me: full re-fetch every poll (no ETag/304) and no per-bucket failure markers in the series. Free tier 10 req/min.
 - **BetterStack** — rich data, but spread across N+1 calls and **no per-monitor deep-link** (team slug isn't in the API).
 - **Uptime Kuma** — great self-hosted data, but the status-page path has **no per-monitor links** and **no remote control**; 24h uptime only.
 - **Healthchecks.io** — cron/heartbeat focused: **no uptime %**, "latency" is job run-time, and deep-links/detail need the **read-write** key.
+
+---
+
+## Customer-facing articulation (website / About-Help "bones")
+
+> **Purpose of this section.** These are the verified, honest *bones* for the
+> `uptimebar_website` marketing content and a future in-app About/Help → "How
+> UptimeBar talks to your providers" note. Everything here is reproducible from
+> public API docs — that's the point: a developer audience can *check* it, which
+> is what makes it persuasive. **Lead with the felt benefit; let the numbers be
+> the proof underneath.** Frame as *fit*, never as "competitor X is bad."
+
+### The one-glance fleet test (the headline contrast)
+
+The job a menu-bar uptime app actually does: **show every monitor's live latency
++ uptime in one cheap, always-on glance.** Score each provider by how many HTTP
+calls that takes for ~30 monitors:
+
+| Provider | Calls for 30 monitors' status + latency + uptime | Why |
+|---|---|---|
+| **Watch4.me** | **1 call** (then ~free) | Purpose-built `/monitors/status` aggregation endpoint + ETag/304 → steady state returns 304, nearly free |
+| **UptimeRobot** | **1 call** | Aggregation bolted onto the list call via params (`response_times`, `custom_uptime_ratios`) |
+| **BetterStack** | **~61 calls** (1 + 2×30) | No fleet-aggregation path: latency + SLA are **one call per monitor each** |
+| **Uptime Kuma** | **2 calls** | Status-page + heartbeat endpoints (self-hosted; one published page) |
+| **Healthchecks.io** | n/a | No uptime % and "latency" is job run-time — different problem domain |
+
+The kicker line, and the **only true "only-Watch4.me" trait: conditional polling
+(ETag/304).** Every other provider is full-fetch-every-poll; Watch4.me's steady
+state is a 304 with no body. "It just stays current in the background, nearly for
+free" is a benefit only Watch4.me can claim.
+
+### Why BetterStack costs 61 calls — and why that's *not* a knock on BetterStack
+
+This must be framed precisely or it reads as a hit piece (and a developer will
+see through it). BetterStack's API is **mature and rich** — per-region latency
+series, SLA with date ranges, a full incidents resource, write actions. It is
+**not** under-built. The mismatch is **interaction model, not quality**:
+
+- BetterStack's API is **resource-oriented / one-entity-per-call** — the textbook
+  REST design, and the *right* one for **its** primary consumers: its own web
+  dashboard (you drill into one monitor, *then* it loads that monitor's chart +
+  SLA), Terraform/config-as-code, and incident-management integrations. None of
+  those ever need "all monitors' stats at once," so no such endpoint exists.
+- **Our** consumer is the opposite: an **at-a-glance fleet aggregator**. We want
+  the whole fleet's stats in one shot, on a background timer.
+- So the honest story is **"different tools, different shapes."** BetterStack's
+  drill-down model is correct for drill-down consumers; Watch4.me's aggregation
+  endpoint is correct for a menu-bar glance — *because Watch4.me built it for
+  exactly this use case.* You're choosing the axis of comparison, and choosing
+  one where the answer is honestly in our favor.
+
+**The proxy caution:** the call-count is *evidence*, not the pitch. What the
+customer feels is the consequence — faster popovers, lighter network/battery, no
+rate-limit risk, "always current in the background." Latency/SLA numbers don't
+change second-to-second, so a per-monitor fan-out is wasted work for a glance.
+
+### Where the contrast is NOT in our favor (keep us honest)
+
+- **Sparklines aren't "only Watch4.me"** — UptimeRobot (free, one call, ~194 pts)
+  AND self-hosted Uptime Kuma both have real latency series. **Do NOT pitch
+  "we have sparklines" as a differentiator** — three providers do. The honest
+  fidelity edge is *narrower*: Watch4.me's series carries **per-bucket failure
+  markers** (the `failures` field → red dots on the line); UptimeRobot's omits
+  failed checks, so it can't mark outages on the sparkline. Lead with the ETag/304
+  "stays current nearly for free" story instead — that one IS Watch4.me-only.
+- BetterStack is a **bigger, broader product** — we lose a feature-checkbox war.
+  That's *why* we compete on fit-for-a-menu-bar, not on feature count.
 
 ---
 
@@ -115,19 +190,23 @@ strategy (#5) explicitly targets. Our app must accept a custom base URL for them
 - **One call returns everything** the app needs: monitor `id`, `friendly_name`,
   `url`, `status`, `average_response_time`, `custom_uptime_ratio`,
   `all_time_uptime_ratio`, `response_times`, `logs`. Read-only key works for all reads. ✅
-- Latency **current**: `average_response_time` (e.g. `372.000`). ✅
-- Latency **history (sparkline)**: ⚠️ **WEAKER than docs implied.** With
-  `response_times=1` AND an explicit 24h `response_times_start_date/end_date`,
-  the free tier returned **exactly ONE point** (the latest). So on free tier
-  there is effectively **no usable response-time *series*** — current value only.
-  (Pro reportedly retains history; **unverified — needs Pro**.) → A real sparkline
-  is **not** free-tier viable here.
+- Latency **current**: `average_response_time` — returned as a **STRING**
+  (e.g. `"409.531"`), not a number. Parse it. ✅
+- Latency **history (sparkline)**: ✅ **CORRECTED 2026-06-28 — real series IS
+  free-tier viable.** `response_times=1` with **NO date range** returns the full
+  retained window (**~194 points / ~24h**, 5-min buckets), each `{datetime, value}`
+  with `value` = integer ms, newest-first. The earlier "1 point only" result was
+  an artifact of passing explicit `response_times_start_date/end_date` — *those*
+  truncate the series; omit them. **Caveat:** no per-bucket failure flag (failed
+  checks are omitted from the series), so the sparkline has no red markers.
 - Uptime: ✅ `custom_uptime_ratios=1-7-30` → `"100.000-100.000-100.000"`;
   `all_time_uptime_ratio` works. Free tier. ✅
 - Status-change ("down for Xm"): `logs=1` → `{type,datetime,duration}`. Live monitor
   returned `logs: []` (brand-new, no events yet) — **mechanism documented, empty
   until events occur; revisit once the monitor has history.** ⚠️
-- Deep-link: stable numeric `id` + target `url`; **no dashboard URL field** — unofficial. ⚠️
+- Deep-link: no dashboard-URL *field* in the API, but the route is stable and
+  **live-verified**: `dashboard.uptimerobot.com/monitors/<numeric id>` opens that
+  monitor directly. We build it from `id`. (Unofficial but reliable.) ✅
 - Actions: `editMonitor` pause/resume (RW key). No mute/ack.
 - Polling: **no ETag/304**; rate limit free 10/min.
 
