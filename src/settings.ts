@@ -7,7 +7,49 @@ interface ProviderConfig {
   base_url: string | null;
   interval_secs: number | null;
   extra: string | null;
+  color: string | null;
 }
+
+// Shared provider-bar palette — Apple's Finder/tag label colors, used on both
+// macOS and Windows. Keep in sync with PALETTE in popover.ts. Order = swatch order.
+const PALETTE: { name: string; hex: string }[] = [
+  { name: "Red", hex: "#e5484d" },
+  { name: "Orange", hex: "#f5821f" },
+  { name: "Yellow", hex: "#f5d90a" },
+  { name: "Green", hex: "#30a46c" },
+  { name: "Blue", hex: "#3b82f6" },
+  { name: "Purple", hex: "#a855f7" },
+  { name: "Pink", hex: "#e93d82" },
+  { name: "Gray", hex: "#8b8d98" },
+];
+
+// Lucide icons (MIT), inlined as SVG so there's no dependency or network fetch.
+// 16px, currentColor stroke — they inherit the button's text color. Paths copied
+// verbatim from lucide.dev: refresh-cw (Test), pencil (Edit), trash-2 (Remove).
+const svg = (paths: string) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" ` +
+  `fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ` +
+  `stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+
+const ICONS = {
+  test: svg(
+    `<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>` +
+      `<path d="M21 3v5h-5"/>` +
+      `<path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>` +
+      `<path d="M8 16H3v5"/>`,
+  ),
+  edit: svg(
+    `<path d="M21.174 6.812a1 1 0 0 0-3.986-3.986L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>` +
+      `<path d="m15 5 4 4"/>`,
+  ),
+  remove: svg(
+    `<path d="M3 6h18"/>` +
+      `<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>` +
+      `<path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>` +
+      `<line x1="10" x2="10" y1="11" y2="17"/>` +
+      `<line x1="14" x2="14" y1="11" y2="17"/>`,
+  ),
+};
 
 interface ProviderMeta {
   kind: string;
@@ -32,8 +74,71 @@ let kinds: ProviderMeta[] = [];
 // and the Show button is disabled until the user types a replacement.
 let editingHasSavedKey = false;
 
+// Currently selected provider-bar color (hex), or null = use the kind default.
+let selectedColor: string | null = null;
+
 function el<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
+}
+
+// Per-kind default bar colors — must mirror KIND_META in popover.ts, so the
+// "Default" chip and the current-color preview show what no-override resolves to.
+const KIND_COLOR: Record<string, string> = {
+  watch4me: "#3b82f6",
+  healthchecks: "#30a46c",
+  betterstack: "#a855f7",
+  uptimerobot: "#f59e0b",
+  uptimekuma: "#14b8a6",
+};
+const kindColor = (kind: string) => KIND_COLOR[kind] ?? "#8b8d98";
+
+// The color currently in effect for the form's provider: the chosen override, or
+// the kind default when none is set.
+function effectiveColor(): string {
+  return selectedColor ?? kindColor(el<HTMLSelectElement>("kind").value);
+}
+
+// Render the color-swatch picker into #color-swatches, reflecting `selectedColor`,
+// plus a "Current" preview dot so it's obvious which color is active right now.
+// A "Default" swatch (null) clears the override so the kind's default color wins.
+function renderSwatches() {
+  const wrap = el("color-swatches");
+  wrap.innerHTML = "";
+
+  // Current-color preview: a filled dot + label, so the active color is explicit
+  // (not just inferred from which swatch has a ring).
+  const current = document.createElement("span");
+  current.className = "swatch-current";
+  const cdot = document.createElement("span");
+  cdot.className = "swatch-current-dot";
+  cdot.style.background = effectiveColor();
+  const clabel = document.createElement("span");
+  clabel.textContent =
+    selectedColor === null
+      ? "Current: provider default"
+      : `Current: ${PALETTE.find((c) => c.hex === selectedColor)?.name ?? "custom"}`;
+  current.append(cdot, clabel);
+  wrap.append(current);
+
+  const row = document.createElement("div");
+  row.className = "swatch-row";
+  const make = (hex: string | null, title: string) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "swatch";
+    b.title = title;
+    if (hex) b.style.background = hex;
+    else b.classList.add("swatch-default"); // diagonal-slash "no override" chip
+    if (selectedColor === hex) b.classList.add("selected");
+    b.addEventListener("click", () => {
+      selectedColor = hex;
+      renderSwatches();
+    });
+    return b;
+  };
+  row.append(make(null, "Default (provider color)"));
+  for (const c of PALETTE) row.append(make(c.hex, c.name));
+  wrap.append(row);
 }
 
 function show(id: string, visible: boolean) {
@@ -148,6 +253,7 @@ function onKindChange() {
   syncSecretField();
   clearResult();
   applyMeta(m);
+  renderSwatches(); // the "Default" preview tracks the newly selected kind
 }
 
 // --- Validation --------------------------------------------------------------
@@ -162,6 +268,7 @@ function formValues(): { config: ProviderConfig; secret: string } {
       base_url: el<HTMLInputElement>("base_url").value.trim() || null,
       interval_secs: intervalRaw ? parseInt(intervalRaw, 10) : null,
       extra: el<HTMLInputElement>("extra").value.trim() || null,
+      color: selectedColor,
     },
     secret: el<HTMLInputElement>("secret").value,
   };
@@ -237,6 +344,8 @@ async function fillForm(p: ProviderConfig) {
   el<HTMLInputElement>("interval_secs").value = p.interval_secs?.toString() ?? "";
   el<HTMLInputElement>("extra").value = p.extra ?? "";
   el<HTMLInputElement>("secret").value = "";
+  selectedColor = p.color ?? null;
+  renderSwatches();
   hideSecret();
   editingHasSavedKey = await invoke<boolean>("provider_has_secret", { id: p.id });
   syncSecretField();
@@ -254,6 +363,8 @@ function resetForm() {
   el("form-title").textContent = "Add a provider";
   el<HTMLButtonElement>("cancel").hidden = true;
   editingHasSavedKey = false;
+  selectedColor = null;
+  renderSwatches();
   hideSecret();
   clearResult();
   onKindChange();
@@ -267,6 +378,8 @@ function startAdd() {
   el("form-title").textContent = "Add a provider";
   el<HTMLButtonElement>("cancel").hidden = false;
   editingHasSavedKey = false;
+  selectedColor = null;
+  renderSwatches();
   hideSecret();
   clearResult();
   onKindChange();
@@ -323,9 +436,9 @@ async function loadBrowsers() {
 /// backend falls back to the keychain when the passed secret is empty). Gives
 /// quick feedback without opening the edit form and scrolling to Test.
 async function testRow(p: ProviderConfig, btn: HTMLButtonElement) {
-  const original = btn.textContent;
   btn.disabled = true;
-  btn.textContent = "Testing…";
+  // Spin the refresh icon in place while the test runs (button stays compact).
+  btn.classList.add("spinning");
   try {
     const res = await invoke<{ count: number; note: string | null }>("test_provider", {
       config: p,
@@ -338,7 +451,7 @@ async function testRow(p: ProviderConfig, btn: HTMLButtonElement) {
     toast(`“${p.label}” failed: ${e}`);
   } finally {
     btn.disabled = false;
-    btn.textContent = original;
+    btn.classList.remove("spinning");
   }
 }
 
@@ -389,14 +502,26 @@ async function loadProviders() {
       return b;
     }
 
+    // Icon-only action button with a hover tooltip (the word). The SVG carries no
+    // text, so the title + aria-label keep it labeled/accessible.
+    function mkIcon(svg: string, title: string, cls: string): HTMLButtonElement {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `btn btn-icon btn-sm ${cls}`.trim();
+      b.innerHTML = svg;
+      b.title = title;
+      b.setAttribute("aria-label", title);
+      return b;
+    }
+
     function showDefault() {
       if (revertTimer) clearTimeout(revertTimer);
       btns.innerHTML = "";
-      const test = mkBtn("Test", "");
+      const test = mkIcon(ICONS.test, "Test", "");
       test.addEventListener("click", () => testRow(p, test));
-      const edit = mkBtn("Edit", "");
+      const edit = mkIcon(ICONS.edit, "Edit", "");
       edit.addEventListener("click", () => fillForm(p));
-      const del = mkBtn("Remove", "");
+      const del = mkIcon(ICONS.remove, "Remove", "btn-icon-danger");
       del.addEventListener("click", showConfirm);
       btns.append(test, edit, del);
     }
@@ -437,6 +562,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   await loadKinds();
   await loadProviders();
   await loadBrowsers();
+  renderSwatches();
 
   // Live validation + clear stale results as the user types.
   for (const id of ["label", "base_url", "secret", "interval_secs"]) {
