@@ -56,7 +56,11 @@ body {
 /* ---------- Popover ---------- */
 body.popover {
   width: 340px;
-  height: 440px;
+  /* Fill the window, whatever height the native side has set it to (the webview
+     reports its natural content height and Rust fits the window to it, clamped).
+     The list inside keeps flex:1 + overflow-y:auto, so it scrolls only once the
+     window hits its max height. */
+  height: 100vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -104,6 +108,13 @@ body.popover {
   padding: 4px 0;
   overflow-y: auto;
   flex: 1;
+  /* Reserve a stable gutter so the (native macOS overlay) scrollbar doesn't cause
+     content reflow when it appears. We rely on the OS scrollbar — WKWebView ignores
+     ::-webkit-scrollbar styling unless the system "Show scroll bars" pref is
+     "Always", so a custom-styled bar isn't worth it. Wheel/trackpad scrolling is
+     the common path and works; the focus-loss-on-drag bug is fixed natively (see
+     the pointer-inside guard in lib.rs / tray.rs). */
+  scrollbar-gutter: stable;
 }
 
 .monitor {
@@ -113,6 +124,13 @@ body.popover {
   padding: 8px 12px 8px 9px;
   border-left: 3px solid transparent; /* color set inline per service */
 }
+/* Grouped rows continue the header's bold 5px band (same kind color), so the
+   whole provider section reads as one left-edge stripe. Pad-left compensates
+   for the wider border to keep text aligned with the header. */
+.monitor.grouped {
+  border-left-width: 5px;
+  padding-left: 7px;
+}
 .monitor:hover {
   background: var(--bg-elev);
 }
@@ -120,19 +138,36 @@ body.popover {
   cursor: pointer;
 }
 
-.mode-btn {
+/* Segmented controls (Flat|Grouped, All|Problems): the selected segment is
+   shaded, so both toggles communicate state the same way (replacing the old
+   label-swap + lone-active-button inconsistency). */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.seg {
   font-size: 11px;
   padding: 2px 8px;
-  width: auto;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1.6;
 }
-/* Engaged filter ("Problems") reads as an applied state. */
-.mode-btn.active {
+.seg + .seg {
+  border-left: 1px solid var(--border);
+}
+.seg:hover {
+  background: var(--bg-elev);
+}
+.seg.active {
   background: var(--accent);
   color: var(--accent-fg);
 }
-.mode-btn.active:hover {
+.seg.active:hover {
   background: var(--accent);
-  color: var(--accent-fg);
   filter: brightness(1.08);
 }
 
@@ -140,17 +175,19 @@ body.popover {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 5px 12px;
+  padding: 5px 12px 5px 9px;
   font-size: 12px;
   /* Faint elevated band — the native macOS sectioned-list idiom. Built from
      themed tokens so it flips with light/dark automatically. */
   background: var(--bg-elev);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  /* Pin the provider name while scrolling its group. */
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  /* Provider identity is a bold left color band (kind color, set inline) that
+     runs down the whole group — header + its rows share the left edge. NOT
+     sticky: pinning was pointless when the window is taller than the content
+     and confusing when one group's list is long but others are short. The
+     persistent color band conveys "which provider" at every window height. */
+  border-left: 5px solid var(--border); /* color set inline per service */
 }
 .group-header:first-child {
   border-top: none;
@@ -618,6 +655,100 @@ body.settings {
   background: var(--down);
   border-color: var(--down);
   filter: brightness(1.08);
+}
+
+/* Icon-only action buttons (Test / Edit / Remove) in provider rows. Square,
+   SVG centered; the title attr carries the word on hover. */
+.btn-icon {
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+.btn-icon:hover:not(:disabled) {
+  color: var(--fg);
+}
+.btn-icon svg {
+  display: block;
+}
+.btn-icon-danger {
+  color: var(--down);
+}
+.btn-icon-danger:hover:not(:disabled) {
+  background: var(--down);
+  border-color: var(--down);
+  color: #fff;
+}
+/* Spin the ⟳ glyph while a row test is in flight (keeps the button compact). */
+.btn-icon.spinning {
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ----- Color swatch picker ----- */
+.swatches {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* "Current: …" preview — makes the active color explicit, not just inferred
+   from which swatch has the selection ring. */
+.swatch-current {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.swatch-current-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--border) inset;
+}
+.swatch-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: 0 0 0 1px var(--border) inset;
+}
+.swatch:hover {
+  filter: brightness(1.08);
+}
+.swatch.selected {
+  border-color: var(--fg);
+}
+/* The "Default" (no override) chip: neutral fill with a diagonal slash. */
+.swatch-default {
+  background: var(--bg-input);
+  position: relative;
+}
+.swatch-default::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  background: linear-gradient(
+    to top right,
+    transparent 45%,
+    var(--muted) 45%,
+    var(--muted) 55%,
+    transparent 55%
+  );
 }
 
 /* ----- Toast ----- */
