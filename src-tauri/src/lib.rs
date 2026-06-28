@@ -36,6 +36,8 @@ pub fn run() {
             commands::refresh_now,
             commands::open_settings,
             commands::close_popover,
+            commands::resize_popover,
+            commands::set_pointer_inside,
             commands::open_url,
             commands::get_browsers,
             commands::get_browser_app,
@@ -68,9 +70,15 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| match event {
-            // Dismiss the popover when it loses focus.
+            // Dismiss the popover when it loses focus — UNLESS the pointer is still
+            // inside it. Dragging the popover's own scrollbar briefly drops window
+            // focus on macOS; without this guard that would dismiss the popover.
             WindowEvent::Focused(false) if window.label() == "popover" => {
-                let _ = window.hide();
+                if crate::tray::pointer_inside() {
+                    log::debug!("popover Focused(false) ignored (pointer inside)");
+                } else {
+                    let _ = window.hide();
+                }
             }
             // Keep the settings window alive (hide instead of destroy) so it can reopen.
             WindowEvent::CloseRequested { api, .. } if window.label() == "settings" => {
