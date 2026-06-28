@@ -13,6 +13,7 @@ interface MonitorView {
   url: string | null;
   detail_url: string | null;
   state_since: string | null;
+  provider_color: string | null;
 }
 
 // Compact human duration since an ISO timestamp, e.g. "14m", "3h", "2d".
@@ -92,6 +93,11 @@ const KIND_META: Record<string, { name: string; color: string }> = {
 const kindName = (k: string) => KIND_META[k]?.name ?? k;
 const kindColor = (k: string) => KIND_META[k]?.color ?? "#8b8d98";
 
+// Resolve a monitor's bar color: the provider's chosen color (a hex string from
+// the Settings palette — Apple tag colors, defined in settings.ts) if set, else
+// the kind default.
+const barColor = (m: MonitorView) => m.provider_color || kindColor(m.provider_kind);
+
 const statusRank = (s: Status) =>
   s === "down" ? 0 : s === "unknown" ? 1 : s === "paused" ? 2 : 3;
 
@@ -127,7 +133,10 @@ const detail = new Map<string, Detail>();
 function monitorRow(m: MonitorView): HTMLLIElement {
   const li = document.createElement("li");
   li.className = "monitor";
-  li.style.borderLeftColor = kindColor(m.provider_kind);
+  // In grouped mode the row joins its header's bold left band (5px, same color);
+  // in flat mode the thinner 3px bar is the only per-service marker.
+  if (groupMode === "provider") li.classList.add("grouped");
+  li.style.borderLeftColor = barColor(m);
 
   const dot = document.createElement("span");
   dot.className = `dot ${m.status}`;
@@ -144,11 +153,16 @@ function monitorRow(m: MonitorView): HTMLLIElement {
   const parts: string[] = [];
   // In a flat list, name the service per row; when grouped the header carries it.
   if (groupMode === "status") parts.push(kindName(m.provider_kind));
-  // Prefer "down for Xm" / "up for Xh" (from state_since) over a raw timestamp;
-  // it's the more useful signal and survives the ETag 304 steady state.
+  // Prefer "down for Xm" / "up for Xh" (from state_since) over a last-checked time;
+  // it's the more useful signal and survives the ETag 304 steady state. When a
+  // provider has no state_since (e.g. BetterStack), fall back to a *relative*
+  // "checked Xm ago" rather than dumping the raw ISO UTC string.
   const dur = durationLabel(m);
   if (dur) parts.push(dur);
-  else if (m.last_checked) parts.push(m.last_checked);
+  else if (m.last_checked) {
+    const ago = since(m.last_checked);
+    parts.push(ago ? `checked ${ago} ago` : m.last_checked);
+  }
   // Tier-3 detail (latency, uptime), enriched on demand when popover opens.
   const det = detail.get(m.key);
   if (det?.latencyMs != null) parts.push(`${Math.round(det.latencyMs)} ms`);
@@ -180,10 +194,14 @@ function monitorRow(m: MonitorView): HTMLLIElement {
 function groupHeader(label: string, kind: string, items: MonitorView[]): HTMLLIElement {
   const li = document.createElement("li");
   li.className = "group-header";
+  // All rows in a group share a provider, so take the chosen color off the first.
+  const color = items.length ? barColor(items[0]) : kindColor(kind);
+  // Bold left color band = provider identity, continuous with its rows below.
+  li.style.borderLeftColor = color;
 
   const dot = document.createElement("span");
   dot.className = "gh-dot";
-  dot.style.background = kindColor(kind);
+  dot.style.background = color;
 
   const lbl = document.createElement("span");
   lbl.className = "gh-label";
@@ -204,7 +222,14 @@ function groupHeader(label: string, kind: string, items: MonitorView[]): HTMLLIE
   return li;
 }
 
+// Render the list, then fit the window to it. `draw` wraps `drawList` so the
+// content-fit runs on every render path (including the early returns inside).
 function draw() {
+  drawList();
+  fitWindow();
+}
+
+function drawList() {
   const list = document.getElementById("list") as HTMLUListElement;
   const empty = document.getElementById("empty") as HTMLElement;
   const summary = document.getElementById("summary") as HTMLElement;
@@ -287,6 +312,22 @@ function setMonitors(monitors: MonitorView[]) {
   draw();
 }
 
+// Fit the native window to the popover's natural content height. The list uses
+// flex:1 + overflow, so its rendered offsetHeight is clamped to the current
+// window; `scrollHeight` gives the true content height instead. Rust clamps the
+// final value to [MIN, MAX] and re-anchors to the tray icon. Called after draw().
+function fitWindow() {
+  const header = document.querySelector(".popover-header") as HTMLElement | null;
+  const list = document.getElementById("list") as HTMLElement | null;
+  const empty = document.getElementById("empty") as HTMLElement | null;
+  if (!header) return;
+  const listH = list && !list.hidden ? list.scrollHeight : 0;
+  const emptyH = empty && !empty.hidden ? empty.offsetHeight : 0;
+  // +2 guards against sub-pixel rounding that would otherwise show a scrollbar.
+  const height = header.offsetHeight + listH + emptyH + 2;
+  void invoke("resize_popover", { height });
+}
+
 // Own-clock freshness: the team's status endpoint excludes latest_check_at from
 // the ETag, so during 304 steady-state we show "synced Xs ago" from our own last
 // successful sync, not a per-monitor timestamp.
@@ -299,21 +340,14 @@ function syncedLabel(): string {
   return `synced ${Math.floor(secs / 60)}m ago`;
 }
 
-function updateToggleLabel() {
-  const btn = document.getElementById("group-toggle");
-  if (!btn) return;
-  btn.textContent = groupMode === "provider" ? "Ungroup" : "Group";
-  btn.title =
-    groupMode === "provider" ? "Show a flat list (by status)" : "Group monitors by service";
-}
-
-function updateFilterLabel() {
-  const btn = document.getElementById("filter-toggle");
-  if (!btn) return;
-  const on = filterMode === "problems";
-  btn.textContent = on ? "Problems" : "All";
-  btn.title = on ? "Showing only down/degraded — click to show all" : "Show only down/degraded monitors";
-  btn.classList.toggle("active", on);
+// Reflect the active segment in each segmented control (shaded = selected).
+function updateSegments() {
+  document.querySelectorAll<HTMLElement>("#group-seg .seg").forEach((b) => {
+    b.classList.toggle("active", b.dataset.group === groupMode);
+  });
+  document.querySelectorAll<HTMLElement>("#filter-seg .seg").forEach((b) => {
+    b.classList.toggle("active", b.dataset.filter === filterMode);
+  });
 }
 
 async function refresh() {
@@ -360,6 +394,12 @@ async function loadDetail() {
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
+  // Tell the native side whether the pointer is inside the popover, so it can
+  // suppress the focus-loss auto-hide while we drag the popover's own scrollbar
+  // (a scrollbar drag drops window focus on macOS but the pointer stays inside).
+  document.addEventListener("mouseenter", () => invoke("set_pointer_inside", { inside: true }));
+  document.addEventListener("mouseleave", () => invoke("set_pointer_inside", { inside: false }));
+
   // Keyboard shortcuts while the popover is focused. The tray-menu accelerators
   // (⌘,/⌘R) only fire when the menu has context, not when this webview is front,
   // so handle them here too.
@@ -377,21 +417,28 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("refresh")?.addEventListener("click", () => invoke("refresh_now"));
   document.getElementById("settings")?.addEventListener("click", () => invoke("open_settings"));
-  document.getElementById("group-toggle")?.addEventListener("click", () => {
-    groupMode = groupMode === "provider" ? "status" : "provider";
-    localStorage.setItem("uptimebar.group", groupMode);
-    updateToggleLabel();
-    draw();
+  document.querySelectorAll<HTMLElement>("#group-seg .seg").forEach((b) => {
+    b.addEventListener("click", () => {
+      const next = b.dataset.group === "provider" ? "provider" : "status";
+      if (next === groupMode) return;
+      groupMode = next;
+      localStorage.setItem("uptimebar.group", groupMode);
+      updateSegments();
+      draw();
+    });
   });
-  document.getElementById("filter-toggle")?.addEventListener("click", () => {
-    filterMode = filterMode === "problems" ? "all" : "problems";
-    localStorage.setItem("uptimebar.filter", filterMode);
-    updateFilterLabel();
-    draw();
+  document.querySelectorAll<HTMLElement>("#filter-seg .seg").forEach((b) => {
+    b.addEventListener("click", () => {
+      const next = b.dataset.filter === "problems" ? "problems" : "all";
+      if (next === filterMode) return;
+      filterMode = next;
+      localStorage.setItem("uptimebar.filter", filterMode);
+      updateSegments();
+      draw();
+    });
   });
 
-  updateToggleLabel();
-  updateFilterLabel();
+  updateSegments();
   await refresh();
   await loadDetail();
   // The popover is hidden/shown (not reloaded); refresh detail each time a human
