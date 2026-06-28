@@ -19,7 +19,31 @@ const GRAY: (u8, u8, u8) = (0x8B, 0x8D, 0x98);
 
 const ICON_SIZE: u32 = 32;
 const POPOVER_W: f64 = 340.0;
-const POPOVER_H: f64 = 440.0;
+/// Vertical bounds for the content-fitted popover. MIN keeps the header/toolbar
+/// usable even with one monitor; MAX caps it so a large fleet stays on-screen and
+/// the list scrolls beyond this (the scroll the wider color band replaced sticky
+/// for). The window opens at MAX, then the webview shrinks it to fit its content.
+const POPOVER_MIN_H: f64 = 120.0;
+const POPOVER_MAX_H: f64 = 560.0;
+const POPOVER_H: f64 = POPOVER_MAX_H;
+
+/// Last cursor position the popover was anchored to (set on open). The webview
+/// resizes the window after its content renders; we re-anchor to this so the
+/// popover stays put under the tray icon instead of drifting as it grows/shrinks.
+static LAST_ANCHOR: std::sync::Mutex<Option<(f64, f64)>> = std::sync::Mutex::new(None);
+
+/// Whether the pointer is currently inside the popover (reported by the webview).
+/// Guards the focus-loss auto-hide: dragging the popover's own scrollbar briefly
+/// drops window focus on macOS, and we must NOT dismiss in that case.
+static POINTER_INSIDE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_pointer_inside(inside: bool) {
+    POINTER_INSIDE.store(inside, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn pointer_inside() -> bool {
+    POINTER_INSIDE.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     // Accelerators follow macOS muscle memory: ⌘R refresh, ⌘, settings, ⌘Q quit.
@@ -165,6 +189,8 @@ fn toggle_popover(app: &AppHandle, cursor: PhysicalPosition<f64>) {
         let _ = win.hide();
         return;
     }
+    // Remember where we anchored so a later content-fit resize can re-anchor.
+    *LAST_ANCHOR.lock().unwrap() = Some((cursor.x, cursor.y));
     position_popover(app, &win, cursor);
     let _ = win.show();
     let _ = win.set_focus();
@@ -220,4 +246,22 @@ fn position_popover(app: &AppHandle, win: &WebviewWindow, cursor: PhysicalPositi
     y = y.clamp(min_y, max_y.max(min_y));
 
     let _ = win.set_position(PhysicalPosition::new(x, y));
+}
+
+/// Resize the popover to fit its content height (clamped), then re-anchor it to
+/// the tray icon. Called by the webview after it renders, so short lists get a
+/// compact window (no dead space — the reason `position: sticky` looked broken)
+/// and long lists cap at MAX and scroll. Width is fixed.
+pub fn resize_popover(app: &AppHandle, content_h: f64) {
+    let Some(win) = app.get_webview_window("popover") else {
+        return;
+    };
+    let h = content_h.clamp(POPOVER_MIN_H, POPOVER_MAX_H);
+    let _ = win.set_size(tauri::LogicalSize::new(POPOVER_W, h));
+
+    // Re-anchor using the cursor we opened at, so growing/shrinking doesn't push
+    // the popover off the tray icon. If we never recorded one, leave it in place.
+    if let Some((cx, cy)) = *LAST_ANCHOR.lock().unwrap() {
+        position_popover(app, &win, PhysicalPosition::new(cx, cy));
+    }
 }
