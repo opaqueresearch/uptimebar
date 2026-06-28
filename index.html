@@ -11,8 +11,14 @@
     <header class="popover-header">
       <span id="summary" class="summary">Loading…</span>
       <div class="actions">
-        <button id="filter-toggle" class="icon-btn mode-btn" title="Show only down/degraded monitors">All</button>
-        <button id="group-toggle" class="icon-btn mode-btn" title="Group monitors by service">Group</button>
+        <div class="segmented" id="filter-seg" role="group" aria-label="Filter">
+          <button class="seg" data-filter="all" title="Show all monitors">All</button>
+          <button class="seg" data-filter="problems" title="Show only down/degraded monitors">Problems</button>
+        </div>
+        <div class="segmented" id="group-seg" role="group" aria-label="Grouping">
+          <button class="seg" data-group="status" title="Flat list, sorted by status">Flat</button>
+          <button class="seg" data-group="provider" title="Group monitors by service">Grouped</button>
+        </div>
         <button id="refresh" title="Refresh now" class="icon-btn">⟳</button>
         <button id="settings" title="Settings" class="icon-btn">⚙</button>
       </div>
