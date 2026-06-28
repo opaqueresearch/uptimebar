@@ -103,6 +103,32 @@ pub fn close_popover(app: AppHandle) {
     }
 }
 
+/// Fit the popover window to its rendered content height (clamped), called by the
+/// webview after each draw. Keeps short lists compact and long ones scrollable.
+#[tauri::command]
+pub fn resize_popover(app: AppHandle, height: f64) {
+    crate::tray::resize_popover(&app, height);
+}
+
+/// The webview reports whether the pointer is currently inside the popover. Used
+/// to suppress the focus-loss auto-hide while the user is interacting with the
+/// window's own scrollbar (which briefly drops focus on macOS — a scrollbar drag
+/// would otherwise dismiss the popover).
+#[tauri::command]
+pub fn set_pointer_inside(app: AppHandle, inside: bool) {
+    crate::tray::set_pointer_inside(inside);
+    // If the pointer leaves while the popover is NOT focused, the user has moved
+    // on (e.g. dragged the scrollbar, then left to another app) and the earlier
+    // Focused(false) was suppressed — so honor the dismiss now.
+    if !inside {
+        if let Some(win) = app.get_webview_window("popover") {
+            if !win.is_focused().unwrap_or(true) {
+                let _ = win.hide();
+            }
+        }
+    }
+}
+
 /// Result of a "Test connection": how many monitors, plus an optional advisory
 /// note (e.g. a Healthchecks read-only key that disables per-check deep-links).
 #[derive(serde::Serialize)]
