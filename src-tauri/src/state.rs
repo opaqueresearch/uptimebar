@@ -36,6 +36,9 @@ pub struct MonitorView {
     /// ISO-8601 when the current status began, if known. The UI computes
     /// "down for Xm" / "up since…" from this against its own clock.
     pub state_since: Option<String>,
+    /// User-chosen left-bar color (hex) from the provider config, if set. The UI
+    /// falls back to the kind's default color when this is None.
+    pub provider_color: Option<String>,
 }
 
 /// Aggregate counts used to drive the tray icon + tooltip.
@@ -177,6 +180,14 @@ impl AppState {
 
     pub fn snapshot_view(&self) -> Vec<MonitorView> {
         let rows = self.rows.lock().unwrap();
+        // Per-provider chosen colors, looked up by provider id (cheap: few configs).
+        let colors: HashMap<String, Option<String>> = self
+            .configs
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|c| (c.id.clone(), c.color.clone()))
+            .collect();
         let mut out: Vec<MonitorView> = rows
             .iter()
             .map(|(k, r)| MonitorView {
@@ -189,6 +200,7 @@ impl AppState {
                 url: r.monitor.url.clone(),
                 detail_url: r.monitor.detail_url.clone(),
                 state_since: r.monitor.state_since.clone(),
+                provider_color: colors.get(&r.provider_id).cloned().flatten(),
             })
             .collect();
         // Down first, then unknown, paused, up; alphabetical within.
