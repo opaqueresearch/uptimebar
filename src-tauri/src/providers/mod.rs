@@ -101,6 +101,10 @@ pub struct ProviderConfig {
     /// by the adapter; surfaced in the UI only when the provider's meta asks for it.
     #[serde(default)]
     pub extra: Option<String>,
+    /// User-chosen color for this provider's left bar in the popover (a hex string
+    /// from the fixed palette). `None` falls back to the kind's default color.
+    #[serde(default)]
+    pub color: Option<String>,
 }
 
 #[async_trait::async_trait]
@@ -215,17 +219,10 @@ pub fn kinds_meta() -> Vec<ProviderMeta> {
             true,
             "API token (starts with w4m_)",
         ),
-        meta(
-            "uptimekuma",
-            "Uptime Kuma",
-            "Reads a public Uptime Kuma status page. Paste the full status-page URL below.",
-            Some("https://github.com/louislam/uptime-kuma/wiki"),
-            None,
-            "https://kuma.example.com/status/your-slug",
-            true,
-            false,
-            "",
-        ),
+        // Uptime Kuma intentionally NOT offered in the Add picker (paused — see
+        // PROVIDER-CAPABILITIES.md). The adapter is retained so existing configs
+        // keep working and we can re-enable it later, but it's a low-yield funnel
+        // segment already well served by purpose-built third-party menu-bar apps.
         meta(
             "betterstack",
             "BetterStack",
