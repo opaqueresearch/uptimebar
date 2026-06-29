@@ -11,6 +11,25 @@ use tauri::{Manager, WindowEvent};
 
 use state::AppState;
 
+/// HTTP User-Agent sent to every provider, e.g. "UptimeBar/0.4.0 (macOS; aarch64)".
+/// The OS/arch suffix lets Watch4.me segment funnel traffic by platform (issue #3).
+fn user_agent() -> String {
+    // std::env::consts::OS is lowercase ("macos"/"windows"/"linux"); map to nicer
+    // display names. ARCH ("aarch64"/"x86_64") is already presentable.
+    let os = match std::env::consts::OS {
+        "macos" => "macOS",
+        "windows" => "Windows",
+        "linux" => "Linux",
+        other => other,
+    };
+    format!(
+        "UptimeBar/{} ({}; {})",
+        env!("CARGO_PKG_VERSION"),
+        os,
+        std::env::consts::ARCH,
+    )
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Logs to stderr (visible in `tauri dev`). Override with RUST_LOG=debug.
@@ -55,7 +74,7 @@ pub fn run() {
 
             let http = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
-                .user_agent(concat!("UptimeBar/", env!("CARGO_PKG_VERSION")))
+                .user_agent(user_agent())
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new());
 
