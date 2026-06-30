@@ -7,7 +7,7 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::config;
 use crate::providers::{self, ProviderConfig};
-use crate::state::{AppState, MonitorView};
+use crate::state::{AppState, DetailDecision, MonitorView};
 
 /// Open a URL in the user's chosen browser (monitor + docs links). Falls back to
 /// the system default when no browser is configured, or if launching the chosen
@@ -50,20 +50,45 @@ pub fn get_monitors(state: State<AppState>) -> Vec<MonitorView> {
 
 /// On-demand rich detail (latency, uptime %, …) for one provider — called when
 /// the popover opens, not on every poll. Returns provider-native JSON or null.
+///
+/// The popover re-requests this on every open/focus, so it is gated by a
+/// per-provider cache (TTL = the poll interval) with an in-flight guard: the
+/// remote data only changes at the poll cadence, so flicking the popover open
+/// and closed serves cached detail instead of hammering the provider API.
+/// `force: true` (manual refresh) bypasses the freshness check.
 #[tauri::command]
 pub async fn get_provider_detail(
     app: AppHandle,
     provider_id: String,
+    force: Option<bool>,
 ) -> Result<Option<serde_json::Value>, String> {
+    let state = app.state::<AppState>();
+    let ttl = config::effective_interval(&app);
+
+    match state.begin_detail(&provider_id, ttl, force.unwrap_or(false)) {
+        DetailDecision::Hit(value) => return Ok(value),
+        DetailDecision::Fetch => {}
+    }
+
     // Clone the Arc out and drop the lock guard before awaiting.
     let provider = {
-        let state = app.state::<AppState>();
         let reg = state.registry.read().unwrap();
         reg.iter().find(|p| p.id() == provider_id).cloned()
     };
-    match provider {
-        Some(p) => p.fetch_detail().await.map_err(|e| e.to_string()),
+    let result = match provider {
+        Some(p) => p.fetch_detail().await,
         None => Ok(None),
+    };
+    match result {
+        Ok(value) => {
+            state.finish_detail(&provider_id, value.clone());
+            Ok(value)
+        }
+        Err(e) => {
+            // Release the in-flight slot (and back off for the TTL) even on error.
+            state.finish_detail(&provider_id, None);
+            Err(e.to_string())
+        }
     }
 }
 

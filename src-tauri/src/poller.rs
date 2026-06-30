@@ -13,16 +13,15 @@ use crate::providers::Provider;
 use crate::state::AppState;
 
 const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
-const MIN_INTERVAL_SECS: u64 = 10;
 
 pub async fn run(app: AppHandle) {
     loop {
         poll_once(&app).await;
 
-        let interval = config::poll_interval(&app).max(MIN_INTERVAL_SECS);
+        let interval = config::effective_interval(&app);
         let state = app.state::<AppState>();
         tokio::select! {
-            _ = tokio::time::sleep(Duration::from_secs(interval)) => {}
+            _ = tokio::time::sleep(interval) => {}
             _ = state.refresh.notified() => {}
         }
     }
@@ -74,6 +73,8 @@ pub async fn poll_once(app: &AppHandle) {
         }
     }
 
+    // Stamp the completion so the popover-open gate knows how fresh status is.
+    state.mark_polled();
     push_update(app, &state);
 }
 

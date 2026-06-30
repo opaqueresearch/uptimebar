@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 
 use tokio::sync::Notify;
 
@@ -63,6 +64,28 @@ pub struct Transition {
     pub new_status: MonitorStatus,
 }
 
+/// Cached on-demand provider detail (latency/uptime). The popover re-requests
+/// this on every open/focus, but the remote data only changes at the poll
+/// cadence — so we serve a recent result and de-dupe concurrent fetches instead
+/// of hitting the provider API on every open.
+#[derive(Default)]
+pub struct DetailCache {
+    /// When the last fetch *completed* (success or failure). `None` = never.
+    pub fetched_at: Option<Instant>,
+    /// Last successful detail payload, replayed on cache hits.
+    pub value: Option<serde_json::Value>,
+    /// A fetch is currently in flight for this provider.
+    pub in_flight: bool,
+}
+
+/// What `begin_detail` decided a caller should do.
+pub enum DetailDecision {
+    /// Serve this cached value (fresh, or a fetch is already in flight).
+    Hit(Option<serde_json::Value>),
+    /// Caller should fetch; it has been marked in-flight.
+    Fetch,
+}
+
 pub struct AppState {
     pub http: reqwest::Client,
     /// Live provider adapters, rebuilt whenever config changes.
@@ -75,6 +98,10 @@ pub struct AppState {
     pub failures: Mutex<HashMap<String, u32>>,
     /// Signalled to trigger an immediate poll.
     pub refresh: Notify,
+    /// When the last full poll completed — gates redundant open-driven polls.
+    pub last_poll: Mutex<Option<Instant>>,
+    /// Per-provider detail cache, keyed by provider id.
+    pub detail_cache: Mutex<HashMap<String, DetailCache>>,
 }
 
 fn key(provider_id: &str, monitor_id: &str) -> String {
@@ -94,6 +121,55 @@ impl AppState {
             rows: Mutex::new(HashMap::new()),
             failures: Mutex::new(HashMap::new()),
             refresh: Notify::new(),
+            last_poll: Mutex::new(None),
+            detail_cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Record that a full poll just completed.
+    pub fn mark_polled(&self) {
+        *self.last_poll.lock().unwrap() = Some(Instant::now());
+    }
+
+    /// True if a poll completed within `ttl`. The popover-open path uses this to
+    /// skip a redundant immediate poll: the background loop already keeps status
+    /// within one interval, so re-polling on open would only hammer the API.
+    pub fn poll_is_fresh(&self, ttl: Duration) -> bool {
+        self.last_poll
+            .lock()
+            .unwrap()
+            .map(|t| t.elapsed() < ttl)
+            .unwrap_or(false)
+    }
+
+    /// Decide whether a detail request should hit the network. Returns a cached
+    /// value when one was fetched within `ttl` (or a fetch is already in flight,
+    /// to de-dupe overlapping opens); otherwise claims the in-flight slot and
+    /// tells the caller to `Fetch`. `force` bypasses the freshness check (manual
+    /// refresh) but still de-dupes against an in-flight fetch.
+    pub fn begin_detail(&self, id: &str, ttl: Duration, force: bool) -> DetailDecision {
+        let mut cache = self.detail_cache.lock().unwrap();
+        if let Some(e) = cache.get(id) {
+            let fresh = !force
+                && e.fetched_at.map(|t| t.elapsed() < ttl).unwrap_or(false);
+            if fresh || e.in_flight {
+                return DetailDecision::Hit(e.value.clone());
+            }
+        }
+        cache.entry(id.to_string()).or_default().in_flight = true;
+        DetailDecision::Fetch
+    }
+
+    /// Release the in-flight slot and record the outcome. The timestamp is
+    /// stamped on success *and* failure so errors back off for `ttl` too; the
+    /// value is only replaced on success (a failure keeps the last good detail).
+    pub fn finish_detail(&self, id: &str, value: Option<serde_json::Value>) {
+        let mut cache = self.detail_cache.lock().unwrap();
+        let e = cache.entry(id.to_string()).or_default();
+        e.in_flight = false;
+        e.fetched_at = Some(Instant::now());
+        if value.is_some() {
+            e.value = value;
         }
     }
 
@@ -176,6 +252,8 @@ impl AppState {
         rows.retain(|_, r| live_provider_ids.iter().any(|id| id == &r.provider_id));
         let mut failures = self.failures.lock().unwrap();
         failures.retain(|id, _| live_provider_ids.iter().any(|x| x == id));
+        let mut detail = self.detail_cache.lock().unwrap();
+        detail.retain(|id, _| live_provider_ids.iter().any(|x| x == id));
     }
 
     pub fn snapshot_view(&self) -> Vec<MonitorView> {
@@ -233,5 +311,63 @@ fn rank(s: MonitorStatus) -> u8 {
         MonitorStatus::Unknown => 1,
         MonitorStatus::Paused => 2,
         MonitorStatus::Up => 3,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state() -> AppState {
+        AppState::new(reqwest::Client::new(), Vec::new())
+    }
+
+    #[test]
+    fn poll_freshness_tracks_last_poll() {
+        let s = state();
+        // Never polled ⇒ never fresh, so an open would force a poll.
+        assert!(!s.poll_is_fresh(Duration::from_secs(60)));
+        s.mark_polled();
+        assert!(s.poll_is_fresh(Duration::from_secs(60)));
+        // A zero TTL is always stale, even right after polling.
+        assert!(!s.poll_is_fresh(Duration::ZERO));
+    }
+
+    #[test]
+    fn first_detail_request_fetches_then_serves_cache() {
+        let s = state();
+        let ttl = Duration::from_secs(60);
+        // Cold cache ⇒ the caller is told to fetch.
+        assert!(matches!(s.begin_detail("p", ttl, false), DetailDecision::Fetch));
+        s.finish_detail("p", Some(serde_json::json!({"v": 1})));
+        // Within TTL the next open is served from cache — no network.
+        match s.begin_detail("p", ttl, false) {
+            DetailDecision::Hit(Some(v)) => assert_eq!(v["v"], 1),
+            other => panic!("expected cache hit, got {:?}", matches!(other, DetailDecision::Fetch)),
+        }
+    }
+
+    #[test]
+    fn force_bypasses_freshness_but_cache_replays_value() {
+        let s = state();
+        let ttl = Duration::from_secs(60);
+        s.begin_detail("p", ttl, false);
+        s.finish_detail("p", Some(serde_json::json!({"v": 1})));
+        // Forced refresh ignores the fresh cache and re-fetches.
+        assert!(matches!(s.begin_detail("p", ttl, true), DetailDecision::Fetch));
+    }
+
+    #[test]
+    fn in_flight_request_is_not_duplicated() {
+        let s = state();
+        let ttl = Duration::from_secs(60);
+        // First caller claims the in-flight slot (told to fetch)…
+        assert!(matches!(s.begin_detail("p", ttl, false), DetailDecision::Fetch));
+        // …a concurrent open gets a cache hit (stale/None) instead of a 2nd GET,
+        // even with force set.
+        assert!(matches!(s.begin_detail("p", ttl, true), DetailDecision::Hit(_)));
+        // Once the fetch finishes, the slot is released and a stale TTL re-fetches.
+        s.finish_detail("p", None);
+        assert!(matches!(s.begin_detail("p", Duration::ZERO, false), DetailDecision::Fetch));
     }
 }
