@@ -39,6 +39,18 @@ fn use_keychain() -> bool {
 
 pub const DEFAULT_INTERVAL_SECS: u64 = 60;
 
+/// Floor on the poll cadence — also the freshness window the popover-open gate
+/// uses, so flicking the popover never polls faster than this.
+pub const MIN_INTERVAL_SECS: u64 = 10;
+
+/// The configured poll interval, clamped to the floor. This is both the
+/// background poll cadence and the TTL for the open-driven status/detail gates:
+/// the remote monitors only produce new data at this rate, so re-requesting
+/// within the window just wastes provider quota.
+pub fn effective_interval(app: &AppHandle) -> std::time::Duration {
+    std::time::Duration::from_secs(poll_interval(app).max(MIN_INTERVAL_SECS))
+}
+
 // Secrets live in an owner-only (0600) file in the app data dir, NOT the OS
 // keychain. The keychain binds each item to the app's code signature, so an
 // unsigned dev build that is recompiled can't read back what a previous build

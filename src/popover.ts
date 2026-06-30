@@ -357,12 +357,14 @@ async function refresh() {
 // Tier-3: fetch rich detail (latency, uptime %) for each provider on demand and
 // merge it into `detail`, then redraw. Best-effort — failures are silent (the
 // always-on status tier already populated the list). Runs when the popover opens.
-async function loadDetail() {
+// `force` bypasses the native per-provider detail cache (manual refresh); the
+// open/focus path leaves it false so the cache gates repeated opens.
+async function loadDetail(force = false) {
   const ids = new Set(current.map(providerId));
   await Promise.all(
     [...ids].map(async (pid) => {
       try {
-        const data = await invoke<any>("get_provider_detail", { providerId: pid });
+        const data = await invoke<any>("get_provider_detail", { providerId: pid, force });
         const monitors = data?.monitors;
         if (!Array.isArray(monitors)) return;
         for (const md of monitors) {
@@ -412,10 +414,14 @@ window.addEventListener("DOMContentLoaded", async () => {
     } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "r") {
       e.preventDefault();
       invoke("refresh_now");
+      void loadDetail(true);
     }
   });
 
-  document.getElementById("refresh")?.addEventListener("click", () => invoke("refresh_now"));
+  document.getElementById("refresh")?.addEventListener("click", () => {
+    invoke("refresh_now");
+    void loadDetail(true);
+  });
   document.getElementById("settings")?.addEventListener("click", () => invoke("open_settings"));
   document.querySelectorAll<HTMLElement>("#group-seg .seg").forEach((b) => {
     b.addEventListener("click", () => {
