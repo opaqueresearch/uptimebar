@@ -11,6 +11,7 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt;
 
+use crate::config;
 use crate::state::{Aggregate, AppState};
 
 const GREEN: (u8, u8, u8) = (0x30, 0xA4, 0x6C);
@@ -196,10 +197,17 @@ fn toggle_popover(app: &AppHandle, cursor: PhysicalPosition<f64>) {
     let _ = win.set_focus();
 
     // Push the latest snapshot to the popover right away (event delivery to a
-    // hidden window is unreliable), and kick a fresh poll for good measure.
+    // hidden window is unreliable) so it shows last-known status instantly.
     let state = app.state::<AppState>();
     let _ = app.emit("monitors:updated", state.snapshot_view());
-    state.refresh.notify_one();
+
+    // Only kick a fresh poll if the last one is stale. The background loop
+    // already keeps status within one interval, and the remote monitors don't
+    // produce new data faster than that — so re-polling on every open would just
+    // hammer provider APIs (open/close/open/close ⇒ a burst of pointless GETs).
+    if !state.poll_is_fresh(config::effective_interval(app)) {
+        state.refresh.notify_one();
+    }
 }
 
 fn position_popover(app: &AppHandle, win: &WebviewWindow, cursor: PhysicalPosition<f64>) {
