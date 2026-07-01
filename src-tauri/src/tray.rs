@@ -1,7 +1,7 @@
-//! System-tray / menubar surface. Aggregate status is shown by swapping a
-//! programmatically-drawn colored dot (no icon asset files needed); the monitor
-//! list is a frameless webview popover opened on left-click; a small native menu
-//! (right-click) holds the app-control verbs.
+//! System-tray / menubar surface. Aggregate status is shown by re-drawing the
+//! brand signal-mark in the status color (green/amber/red) — see `signal_icon`;
+//! no icon asset files needed. The monitor list is a frameless webview popover
+//! opened on left-click; a small native menu (right-click) holds the app verbs.
 
 use tauri::{
     image::Image,
@@ -13,9 +13,13 @@ use tauri_plugin_autostart::ManagerExt;
 
 use crate::state::{Aggregate, AppState};
 
-const GREEN: (u8, u8, u8) = (0x30, 0xA4, 0x6C);
-const RED: (u8, u8, u8) = (0xE5, 0x48, 0x4D);
-const GRAY: (u8, u8, u8) = (0x8B, 0x8D, 0x98);
+// Muted/pastel status tints for the tray tile — desaturated so the menu-bar icon
+// reads softer than a saturated badge. (Full-strength brand colors still used for
+// the popover dots; these are tray-only.)
+const GREEN: (u8, u8, u8) = (0x6F, 0xC1, 0x99);
+const RED: (u8, u8, u8) = (0xE0, 0x8A, 0x8A);
+const AMBER: (u8, u8, u8) = (0xE8, 0xC0, 0x77); // degraded/unknown — warmer than gray
+const GRAY: (u8, u8, u8) = (0xAF, 0xB1, 0xB8); // idle: no monitors configured
 
 const ICON_SIZE: u32 = 32;
 const POPOVER_W: f64 = 340.0;
@@ -72,7 +76,7 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     )?;
 
     TrayIconBuilder::with_id("main")
-        .icon(circle_icon(GRAY))
+        .icon(signal_icon(GRAY))
         .icon_as_template(false)
         .tooltip("UptimeBar")
         .menu(&menu)
@@ -107,7 +111,7 @@ pub fn apply_aggregate(app: &AppHandle, agg: Aggregate) {
     let Some(tray) = app.tray_by_id("main") else {
         return;
     };
-    let _ = tray.set_icon(Some(circle_icon(status_color(agg))));
+    let _ = tray.set_icon(Some(signal_icon(status_color(agg))));
     let _ = tray.set_icon_as_template(false);
     let tip = if agg.total() == 0 {
         "UptimeBar — no monitors configured".to_string()
@@ -120,30 +124,106 @@ pub fn apply_aggregate(app: &AppHandle, agg: Aggregate) {
 fn status_color(agg: Aggregate) -> (u8, u8, u8) {
     if agg.down > 0 {
         RED
-    } else if agg.total() == 0 || (agg.up == 0 && agg.unknown > 0) {
-        GRAY
+    } else if agg.total() == 0 {
+        GRAY // nothing configured yet — neutral
+    } else if agg.up == 0 && agg.unknown > 0 {
+        AMBER // can't reach anything / all degraded
     } else {
         GREEN
     }
 }
 
-/// Draw a solid colored circle on a transparent square as an RGBA image.
-fn circle_icon(color: (u8, u8, u8)) -> Image<'static> {
+/// Draw the tray status icon: a **solid rounded-square (squircle) tile filled in
+/// the status color** (green/amber/red) with the brand **signal-mark in white**
+/// on top. The filled tile gives the color real visual mass at menu-bar size —
+/// thin colored strokes alone were nearly invisible. The squircle echoes the
+/// app/DMG icon; the white mark keeps the brand shape legible.
+///
+/// Mark geometry mirrors assets/icons/uptimebar-template.svg (512 viewBox): center
+/// dot r=38, one arc per side at r=150, stroke ~40 — scaled to ICON_SIZE. Rendered
+/// with 3× supersampling for crisp anti-aliasing at small size.
+fn signal_icon(color: (u8, u8, u8)) -> Image<'static> {
     let s = ICON_SIZE;
     let mut buf = vec![0u8; (s * s * 4) as usize];
-    let center = (s as f32 - 1.0) / 2.0;
-    let radius = center - 2.0;
+
+    let scale = s as f32 / 512.0;
+    let cx = (s as f32 - 1.0) / 2.0;
+    let cy = (s as f32 - 1.0) / 2.0;
+
+    // Squircle tile: nearly the full icon, small inset so it doesn't touch edges.
+    let tile_half = (s as f32) / 2.0 - 1.5;
+    let tile_radius = tile_half * 0.42; // corner rounding
+
+    // Mark, slightly smaller than the SVG so it sits comfortably inside the tile.
+    let mark_scale = scale * 0.82;
+    // Heavier strokes than the SVG's 40 so the white mark has presence on the tile
+    // (thin arcs read as ~1px and disappear); a bigger dot balances it.
+    let dot_r = 50.0 * mark_scale;
+    let arc_r = 150.0 * mark_scale;
+    let half_stroke = (58.0 * mark_scale) / 2.0;
+    let arc_half_angle = (116.0_f32).atan2(104.0);
+
+    const SS: u32 = 3;
+    let inv_ss = 1.0 / SS as f32;
+    let samples = (SS * SS) as f32;
+
+    // Signed-distance to a rounded rectangle centered at (cx,cy); <=0 is inside.
+    let sd_squircle = |px: f32, py: f32| -> f32 {
+        let qx = (px - cx).abs() - (tile_half - tile_radius);
+        let qy = (py - cy).abs() - (tile_half - tile_radius);
+        let ox = qx.max(0.0);
+        let oy = qy.max(0.0);
+        (ox * ox + oy * oy).sqrt() + qx.max(qy).min(0.0) - tile_radius
+    };
+
     for y in 0..s {
         for x in 0..s {
-            let dx = x as f32 - center;
-            let dy = y as f32 - center;
-            if dx * dx + dy * dy <= radius * radius {
-                let i = ((y * s + x) * 4) as usize;
-                buf[i] = color.0;
-                buf[i + 1] = color.1;
-                buf[i + 2] = color.2;
-                buf[i + 3] = 255;
+            let mut tile_cov = 0.0f32;
+            let mut mark_cov = 0.0f32;
+            for sy in 0..SS {
+                for sx in 0..SS {
+                    let px = x as f32 + (sx as f32 + 0.5) * inv_ss - 0.5;
+                    let py = y as f32 + (sy as f32 + 0.5) * inv_ss - 0.5;
+
+                    if sd_squircle(px, py) <= 0.0 {
+                        tile_cov += 1.0;
+                    }
+
+                    let dx = px - cx;
+                    let dy = py - cy;
+                    let r = (dx * dx + dy * dy).sqrt();
+                    let inside = r <= dot_r;
+                    let on_arc = if (r - arc_r).abs() <= half_stroke {
+                        let ang = dy.atan2(dx);
+                        let on_right = ang.abs() <= arc_half_angle;
+                        let left_ang = (std::f32::consts::PI - ang.abs()).abs();
+                        let on_left = left_ang <= arc_half_angle;
+                        on_right || on_left
+                    } else {
+                        false
+                    };
+                    if inside || on_arc {
+                        mark_cov += 1.0;
+                    }
+                }
             }
+
+            let tile_a = tile_cov / samples;
+            if tile_a <= 0.0 {
+                continue; // outside the tile — fully transparent
+            }
+            let mark_a = mark_cov / samples;
+            // Composite the white mark over the colored tile.
+            let (r, g, b) = (
+                color.0 as f32 * (1.0 - mark_a) + 255.0 * mark_a,
+                color.1 as f32 * (1.0 - mark_a) + 255.0 * mark_a,
+                color.2 as f32 * (1.0 - mark_a) + 255.0 * mark_a,
+            );
+            let i = ((y * s + x) * 4) as usize;
+            buf[i] = r.round() as u8;
+            buf[i + 1] = g.round() as u8;
+            buf[i + 2] = b.round() as u8;
+            buf[i + 3] = (tile_a * 255.0).round() as u8;
         }
     }
     Image::new_owned(buf, s, s)
