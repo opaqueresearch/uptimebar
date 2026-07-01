@@ -21,6 +21,9 @@ const GREEN: (u8, u8, u8) = (0x6F, 0xC1, 0x99);
 const RED: (u8, u8, u8) = (0xE0, 0x8A, 0x8A);
 const AMBER: (u8, u8, u8) = (0xE8, 0xC0, 0x77); // degraded/unknown — warmer than gray
 const GRAY: (u8, u8, u8) = (0xAF, 0xB1, 0xB8); // idle: no monitors configured
+// The signal-mark drawn on top of the tile: brand dark navy. Dark-on-pastel is
+// high-contrast on all three status colors (white washed out on pastel-red).
+const MARK: (u8, u8, u8) = (0x04, 0x0A, 0x16);
 
 const ICON_SIZE: u32 = 32;
 const POPOVER_W: f64 = 340.0;
@@ -134,11 +137,12 @@ fn status_color(agg: Aggregate) -> (u8, u8, u8) {
     }
 }
 
-/// Draw the tray status icon: a **solid rounded-square (squircle) tile filled in
-/// the status color** (green/amber/red) with the brand **signal-mark in white**
-/// on top. The filled tile gives the color real visual mass at menu-bar size —
-/// thin colored strokes alone were nearly invisible. The squircle echoes the
-/// app/DMG icon; the white mark keeps the brand shape legible.
+/// Draw the tray status icon: a **muted pastel rounded-square (squircle) tile
+/// filled in the status color** (green/amber/red) with the brand **signal-mark in
+/// dark navy** on top. The filled tile gives the color real visual mass at
+/// menu-bar size (thin colored strokes alone were nearly invisible); the dark
+/// mark reads high-contrast on all three pastels (white washed out on pastel-red).
+/// The squircle echoes the app/DMG icon.
 ///
 /// Mark geometry mirrors assets/icons/uptimebar-template.svg (512 viewBox): center
 /// dot r=38, one arc per side at r=150, stroke ~40 — scaled to ICON_SIZE. Rendered
@@ -214,11 +218,11 @@ fn signal_icon(color: (u8, u8, u8)) -> Image<'static> {
                 continue; // outside the tile — fully transparent
             }
             let mark_a = mark_cov / samples;
-            // Composite the white mark over the colored tile.
+            // Composite the dark navy mark over the colored tile.
             let (r, g, b) = (
-                color.0 as f32 * (1.0 - mark_a) + 255.0 * mark_a,
-                color.1 as f32 * (1.0 - mark_a) + 255.0 * mark_a,
-                color.2 as f32 * (1.0 - mark_a) + 255.0 * mark_a,
+                color.0 as f32 * (1.0 - mark_a) + MARK.0 as f32 * mark_a,
+                color.1 as f32 * (1.0 - mark_a) + MARK.1 as f32 * mark_a,
+                color.2 as f32 * (1.0 - mark_a) + MARK.2 as f32 * mark_a,
             );
             let i = ((y * s + x) * 4) as usize;
             buf[i] = r.round() as u8;
