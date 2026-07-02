@@ -1,7 +1,6 @@
 # UptimeBar → Watch4.me: API & Integration Needs
 
-**Audience:** ***REMOVED***
-the Watch4.me service/backend team working on the Watch4.me codebase.
+**Audience:** the Watch4.me service/backend team working on the Watch4.me codebase.
 
 **Context:** UptimeBar is a cross-platform menu-bar/tray uptime notifier and a
 deliberate **funnel into the Watch4.me SaaS**. It is provider-agnostic (also
