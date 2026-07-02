@@ -87,6 +87,45 @@ markers** (the `failures` field) — a fidelity detail UptimeRobot's series lack
 
 ---
 
+## UptimeBar app differentiation (app-vs-app — OUR message to own)
+
+> **Scope of this section (vs. the rest of the doc).** Everything above analyses
+> **watch4.me as a provider** vs other monitoring services — that's watch4.me's
+> market story and should feed **upstream to watch4.me** (centralized competitive
+> research lives there). **This section is different:** it's **UptimeBar the app** vs.
+> **other menu-bar / desktop uptime apps** — the differentiation UptimeBar *owns* and
+> the website *cites*. Keep the two stories separate.
+>
+> Honesty gate: only list a differentiator that's **real and verified**; mark
+> unverified/planned as "planned". The website must trace claims here.
+
+**UptimeBar's genuine app-level differentiators (verify each before marketing):**
+1. **Multi-provider in one glance.** One tray icon + popover spanning UptimeRobot,
+   BetterStack, Healthchecks.io, watch4.me (Uptime Kuma planned) — most menu-bar
+   uptime apps are single-provider (usually just UptimeRobot). ✅ real today.
+2. **Truly cross-platform, native.** macOS menu bar **and** Windows system tray from
+   one codebase (Tauri). Many competitors are macOS-only. ✅ real today.
+3. **Read-write API control, where the provider allows it.** Not just *viewing* —
+   UptimeBar can pause/resume (and mute/ack where supported) via provider APIs that
+   expose it. Contrast: apps that are read-only status viewers. ⚠️ gate this per
+   provider on the matrix above (pause exists on several; mute/ack is narrower).
+4. **Honest failure semantics.** Provider errors map to **Unknown, not Down** after a
+   threshold — a flaky API never manufactures a fake outage. A trust/quality
+   differentiator most simple pollers lack. ✅ real today.
+5. **First-class deep-links + latency sparklines with failure markers** — where the
+   provider supplies them (best with watch4.me). Gate on the matrix (three providers
+   have sparklines; the failure-marker fidelity is narrower). ⚠️ per-provider.
+
+**Direct-competitor framing (for the website — fit, not attack):** position UptimeBar
+as "the multi-provider, cross-platform, *does-things-not-just-shows-things* menu-bar
+uptime app." Lead with the felt benefit; cite the specific capability as proof.
+
+**Feed-up note:** competitive analysis of *provider* capabilities (the matrix above)
+should be shared to watch4.me as `competitive-research` issues on `joej/watch4.me`.
+This app-differentiation section stays app-owned.
+
+---
+
 ## Customer-facing articulation (website / About-Help "bones")
 
 > **Purpose of this section.** These are the verified, honest *bones* for the
