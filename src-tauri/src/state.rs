@@ -250,6 +250,39 @@ impl AppState {
         }
     }
 
+    /// Apply the authoritative post-action state to the matching row (by
+    /// provider + public_id), so the UI reflects a pause/mute immediately instead
+    /// of waiting for the next poll. `is_paused=true` maps the status to Paused;
+    /// `false` leaves the last non-paused status for the poller to reconcile.
+    pub fn apply_action_outcome(
+        &self,
+        provider_id: &str,
+        public_id: &str,
+        is_paused: Option<bool>,
+        is_muted: Option<bool>,
+    ) {
+        let mut rows = self.rows.lock().unwrap();
+        for row in rows.values_mut() {
+            if row.provider_id == provider_id
+                && row.monitor.public_id.as_deref() == Some(public_id)
+            {
+                if let Some(muted) = is_muted {
+                    row.monitor.is_muted = muted;
+                }
+                if let Some(paused) = is_paused {
+                    if paused {
+                        row.monitor.status = MonitorStatus::Paused;
+                    } else if row.monitor.status == MonitorStatus::Paused {
+                        // Resumed: drop back to Unknown until the next poll gives
+                        // the real up/down (avoids showing a stale Paused).
+                        row.monitor.status = MonitorStatus::Unknown;
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     /// Remove all rows belonging to providers no longer in the registry.
     pub fn prune_to(&self, live_provider_ids: &[String]) {
         let mut rows = self.rows.lock().unwrap();
