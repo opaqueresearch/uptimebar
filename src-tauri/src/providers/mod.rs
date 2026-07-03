@@ -70,6 +70,15 @@ pub enum ProviderError {
     Decode(String),
     #[error("{0}")]
     Config(String),
+    /// A write/action endpoint was called with a read-only token (403
+    /// insufficient_scope). Distinct from `Auth` so the UI can prompt for a
+    /// read+write token rather than "the key was rejected".
+    #[error("This API token is read-only. Use a read+write token to control monitors.")]
+    InsufficientScope,
+    /// The provider refused an action against a plan limit (e.g. resuming past the
+    /// active-monitor cap). Carries the provider's human message.
+    #[error("{0}")]
+    PlanLimit(String),
 }
 
 impl From<reqwest::Error> for ProviderError {
@@ -116,6 +125,27 @@ pub struct ProviderConfig {
     pub color: Option<String>,
 }
 
+/// A write action a provider may support against one monitor. `Mute` carries an
+/// optional duration in seconds (`None` = indefinite).
+#[derive(Clone, Copy, Debug)]
+pub enum MonitorAction {
+    Pause,
+    Resume,
+    Mute { duration_secs: Option<u64> },
+    Unmute,
+}
+
+/// The authoritative post-action state a provider reports, so the caller can
+/// update local state without waiting for the next poll. Fields are `None` when
+/// the action doesn't affect them.
+#[derive(Clone, Debug, Default)]
+pub struct ActionOutcome {
+    pub is_paused: Option<bool>,
+    pub is_muted: Option<bool>,
+    /// False when the monitor was already in the requested state (idempotent no-op).
+    pub changed: bool,
+}
+
 #[async_trait::async_trait]
 pub trait Provider: Send + Sync {
     /// Stable kind identifier, e.g. "uptimerobot".
@@ -132,6 +162,20 @@ pub trait Provider: Send + Sync {
     /// the frontend renders opportunistically; `None` means "no detail tier".
     async fn fetch_detail(&self) -> Result<Option<serde_json::Value>, ProviderError> {
         Ok(None)
+    }
+
+    /// Perform a write action against one monitor (identified by its provider-native
+    /// public id). Returns the authoritative post-action state. Defaults to
+    /// unsupported so read-only adapters compile unchanged; only providers with an
+    /// action API (Watch4.me) override this.
+    async fn monitor_action(
+        &self,
+        _public_id: &str,
+        _action: MonitorAction,
+    ) -> Result<ActionOutcome, ProviderError> {
+        Err(ProviderError::Config(
+            "This provider doesn't support monitor actions.".into(),
+        ))
     }
 }
 

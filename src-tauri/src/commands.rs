@@ -2,11 +2,11 @@
 //! mutations go through here so Rust owns the invariants (persist → rebuild
 //! registry → trigger an immediate poll). Secrets are write-only.
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::config;
-use crate::providers::{self, ProviderConfig};
+use crate::providers::{self, MonitorAction, ProviderConfig};
 use crate::state::{AppState, DetailDecision, MonitorView};
 
 /// Open a URL in the user's chosen browser (monitor + docs links). Falls back to
@@ -90,6 +90,55 @@ pub async fn get_provider_detail(
             Err(e.to_string())
         }
     }
+}
+
+/// Perform a write action (pause/resume/mute/unmute) against one monitor. Keyed by
+/// the provider's native `public_id`. On success, applies the authoritative outcome
+/// locally + emits `monitors:updated` for instant feedback, then triggers a poll to
+/// reconcile. A read-only token yields `InsufficientScope`, which the frontend
+/// recognizes to hide the action buttons.
+#[tauri::command]
+pub async fn monitor_action(
+    app: AppHandle,
+    provider_id: String,
+    public_id: String,
+    action: String,
+    duration_secs: Option<u64>,
+) -> Result<(), String> {
+    let act = match action.as_str() {
+        "pause" => MonitorAction::Pause,
+        "resume" => MonitorAction::Resume,
+        "mute" => MonitorAction::Mute { duration_secs },
+        "unmute" => MonitorAction::Unmute,
+        other => return Err(format!("unknown action: {other}")),
+    };
+
+    // Clone the Arc out and drop the lock guard before awaiting.
+    let provider = {
+        let state = app.state::<AppState>();
+        let reg = state.registry.read().unwrap();
+        reg.iter().find(|p| p.id() == provider_id).cloned()
+    };
+    let Some(provider) = provider else {
+        return Err("provider not found".into());
+    };
+
+    let outcome = provider
+        .monitor_action(&public_id, act)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Idempotent no-op (already in the requested state): nothing to update.
+    if !outcome.changed {
+        return Ok(());
+    }
+    // Optimistic: apply the server's authoritative state + push it, then poll to
+    // reconcile everything else.
+    let state = app.state::<AppState>();
+    state.apply_action_outcome(&provider_id, &public_id, outcome.is_paused, outcome.is_muted);
+    let _ = app.emit("monitors:updated", state.snapshot_view());
+    state.refresh.notify_one();
+    Ok(())
 }
 
 #[tauri::command]
