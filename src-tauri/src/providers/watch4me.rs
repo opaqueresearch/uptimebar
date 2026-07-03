@@ -17,7 +17,9 @@
 
 use std::sync::Mutex;
 
-use super::{Monitor, MonitorStatus, Provider, ProviderConfig, ProviderError};
+use super::{
+    ActionOutcome, Monitor, MonitorAction, MonitorStatus, Provider, ProviderConfig, ProviderError,
+};
 
 pub struct Watch4Me {
     id: String,
@@ -216,4 +218,84 @@ impl Provider for Watch4Me {
             .map_err(|e| ProviderError::Decode(e.to_string()))?;
         Ok(Some(value))
     }
+
+    async fn monitor_action(
+        &self,
+        public_id: &str,
+        action: MonitorAction,
+    ) -> Result<ActionOutcome, ProviderError> {
+        // POST /api/v1/monitors/{public_id}/{pause|resume|mute|unmute}. No body;
+        // mute takes ?duration_seconds=N (omit = indefinite). All idempotent.
+        let (verb, duration) = match action {
+            MonitorAction::Pause => ("pause", None),
+            MonitorAction::Resume => ("resume", None),
+            MonitorAction::Mute { duration_secs } => ("mute", duration_secs),
+            MonitorAction::Unmute => ("unmute", None),
+        };
+        let mut url = format!("{}/api/v1/monitors/{}/{}", self.base, public_id, verb);
+        if let Some(secs) = duration {
+            url = format!("{url}?duration_seconds={secs}");
+        }
+
+        let resp = self
+            .http
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/json")
+            .send()
+            .await?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            // Parse the uniform error envelope ({"error":{"code":...}}) to map the
+            // scope/plan-limit cases to specific errors before the generic fallback.
+            let body = resp.text().await.unwrap_or_default();
+            let code = serde_json::from_str::<ErrorEnvelope>(&body)
+                .ok()
+                .map(|e| e.error);
+            if let Some(err) = code {
+                match err.code.as_str() {
+                    "insufficient_scope" => return Err(ProviderError::InsufficientScope),
+                    "plan_limit" => return Err(ProviderError::PlanLimit(err.message)),
+                    _ => {}
+                }
+            }
+            return Err(super::http_status_error(status));
+        }
+
+        let result: ActionResult = resp
+            .json()
+            .await
+            .map_err(|e| ProviderError::Decode(e.to_string()))?;
+        Ok(ActionOutcome {
+            is_paused: result.is_paused,
+            is_muted: result.is_muted,
+            changed: result.changed,
+        })
+    }
+}
+
+/// Watch4.me action success body (union of pause/resume + mute/unmute shapes).
+#[derive(serde::Deserialize)]
+struct ActionResult {
+    #[serde(default)]
+    is_paused: Option<bool>,
+    #[serde(default)]
+    is_muted: Option<bool>,
+    #[serde(default)]
+    changed: bool,
+}
+
+/// The uniform error envelope from Watch4.me's #728 exception handler.
+#[derive(serde::Deserialize)]
+struct ErrorEnvelope {
+    error: ErrorBody,
+}
+
+#[derive(serde::Deserialize)]
+struct ErrorBody {
+    #[serde(default)]
+    code: String,
+    #[serde(default)]
+    message: String,
 }
