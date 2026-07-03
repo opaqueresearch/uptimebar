@@ -37,6 +37,15 @@ pub struct Monitor {
     /// Drives "down for Xm" / "up since…" in the UI (computed client-side).
     #[serde(default)]
     pub state_since: Option<String>,
+    /// Provider-native *public* id, distinct from `id` (which may be an internal
+    /// numeric id). Watch4.me's action endpoints key on this. `None` for providers
+    /// that don't expose one.
+    #[serde(default)]
+    pub public_id: Option<String>,
+    /// Whether the monitor's alerts are muted at the provider (Watch4.me). Orthogonal
+    /// to up/down; drives the mute/unmute toggle and notification suppression.
+    #[serde(default)]
+    pub is_muted: bool,
 }
 
 /// Errors a provider fetch can produce. Each `Display` is written for the end
