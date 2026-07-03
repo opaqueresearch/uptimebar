@@ -88,6 +88,8 @@ struct MonitorStats {
     #[serde(default)]
     is_paused: bool,
     #[serde(default)]
+    is_muted: bool,
+    #[serde(default)]
     is_stale: bool,
     #[serde(default)]
     state_since: Option<String>,
@@ -119,6 +121,9 @@ impl MonitorStats {
             url: self.url,
             detail_url: Some(detail_url),
             state_since: self.state_since,
+            // Retain public_id — Watch4.me's action endpoints key on it.
+            public_id: self.public_id,
+            is_muted: self.is_muted,
             id: self.id.to_string(),
         }
     }

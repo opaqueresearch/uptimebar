@@ -153,6 +153,8 @@ impl Provider for Healthchecks {
                     detail_url: Some(detail_url),
                     id,
                     state_since: None,
+                    public_id: None,
+                    is_muted: false,
                 }
             })
             .collect())
