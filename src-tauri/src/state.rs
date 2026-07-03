@@ -40,6 +40,10 @@ pub struct MonitorView {
     /// User-chosen left-bar color (hex) from the provider config, if set. The UI
     /// falls back to the kind's default color when this is None.
     pub provider_color: Option<String>,
+    /// Provider-native public id (Watch4.me), for keying monitor actions.
+    pub public_id: Option<String>,
+    /// Whether the monitor's alerts are muted at the provider.
+    pub is_muted: bool,
 }
 
 /// Aggregate counts used to drive the tray icon + tooltip.
@@ -279,6 +283,8 @@ impl AppState {
                 detail_url: r.monitor.detail_url.clone(),
                 state_since: r.monitor.state_since.clone(),
                 provider_color: colors.get(&r.provider_id).cloned().flatten(),
+                public_id: r.monitor.public_id.clone(),
+                is_muted: r.monitor.is_muted,
             })
             .collect();
         // Down first, then unknown, paused, up; alphabetical within.

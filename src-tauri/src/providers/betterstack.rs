@@ -187,6 +187,8 @@ impl Provider for BetterStack {
                     name,
                     id: item.id,
                     state_since: None,
+                    public_id: None,
+                    is_muted: false,
                 }
             })
             .collect())
