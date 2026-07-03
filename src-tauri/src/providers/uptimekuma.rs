@@ -148,6 +148,8 @@ impl Provider for UptimeKuma {
                     url: m.url,
                     detail_url: Some(page_url.clone()),
                     state_since: None,
+                    public_id: None,
+                    is_muted: false,
                 });
             }
         }
