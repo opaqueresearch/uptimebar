@@ -44,6 +44,10 @@ pub struct MonitorView {
     pub public_id: Option<String>,
     /// Whether the monitor's alerts are muted at the provider.
     pub is_muted: bool,
+    /// Whether monitor-action buttons should render for this row: the provider
+    /// supports actions AND its token isn't known to be read-only. (`unknown` scope
+    /// still renders — a runtime 403 demotes it to read and hides them.)
+    pub writable: bool,
 }
 
 /// Aggregate counts used to drive the tray icon + tooltip.
@@ -295,14 +299,17 @@ impl AppState {
 
     pub fn snapshot_view(&self) -> Vec<MonitorView> {
         let rows = self.rows.lock().unwrap();
-        // Per-provider chosen colors, looked up by provider id (cheap: few configs).
-        let colors: HashMap<String, Option<String>> = self
-            .configs
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|c| (c.id.clone(), c.color.clone()))
-            .collect();
+        // Per-provider chosen colors + token scope, looked up by provider id.
+        let (colors, scopes): (
+            HashMap<String, Option<String>>,
+            HashMap<String, Option<String>>,
+        ) = {
+            let configs = self.configs.lock().unwrap();
+            (
+                configs.iter().map(|c| (c.id.clone(), c.color.clone())).collect(),
+                configs.iter().map(|c| (c.id.clone(), c.scope.clone())).collect(),
+            )
+        };
         let mut out: Vec<MonitorView> = rows
             .iter()
             .map(|(k, r)| MonitorView {
@@ -318,6 +325,11 @@ impl AppState {
                 provider_color: colors.get(&r.provider_id).cloned().flatten(),
                 public_id: r.monitor.public_id.clone(),
                 is_muted: r.monitor.is_muted,
+                // Actions only on Watch4.me, and only if the token isn't known
+                // read-only. `public_id` must be present to address the action.
+                writable: r.provider_kind == "watch4me"
+                    && r.monitor.public_id.is_some()
+                    && scopes.get(&r.provider_id).cloned().flatten().as_deref() != Some("read"),
             })
             .collect();
         // Down first, then unknown, paused, up; alphabetical within.

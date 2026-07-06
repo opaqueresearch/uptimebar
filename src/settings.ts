@@ -8,6 +8,10 @@ interface ProviderConfig {
   interval_secs: number | null;
   extra: string | null;
   color: string | null;
+  // Server-owned; the form never sets it (upsert_provider preserves it).
+  scope: string | null;
+  // Per-provider default mute duration in seconds (null = indefinite).
+  mute_default_secs: number | null;
 }
 
 // Shared provider-bar palette — Apple's Finder/tag label colors, used on both
@@ -269,6 +273,10 @@ function formValues(): { config: ProviderConfig; secret: string } {
       interval_secs: intervalRaw ? parseInt(intervalRaw, 10) : null,
       extra: el<HTMLInputElement>("extra").value.trim() || null,
       color: selectedColor,
+      // scope is server-owned (upsert_provider ignores whatever we send here).
+      scope: null,
+      // mute-duration dropdown is wired in the frontend-actions PR; null for now.
+      mute_default_secs: null,
     },
     secret: el<HTMLInputElement>("secret").value,
   };

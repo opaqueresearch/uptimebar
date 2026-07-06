@@ -123,10 +123,16 @@ pub async fn monitor_action(
         return Err("provider not found".into());
     };
 
-    let outcome = provider
-        .monitor_action(&public_id, act)
-        .await
-        .map_err(|e| e.to_string())?;
+    let outcome = match provider.monitor_action(&public_id, act).await {
+        Ok(o) => o,
+        Err(providers::ProviderError::InsufficientScope) => {
+            // The token is read-only after all — demote the stored scope so the
+            // action buttons hide, and surface a stable marker the popover keys on.
+            let _ = config::set_provider_scope(&app, &provider_id, Some("read".into()));
+            return Err("insufficient_scope".into());
+        }
+        Err(e) => return Err(e.to_string()),
+    };
 
     // Idempotent no-op (already in the requested state): nothing to update.
     if !outcome.changed {
@@ -209,6 +215,9 @@ pub fn set_pointer_inside(app: AppHandle, inside: bool) {
 pub struct TestResult {
     pub count: usize,
     pub note: Option<String>,
+    /// Token scope as probed: `"read"` | `"write"` | `null` (unknown). Drives the
+    /// settings scope badge and, for a saved provider, is persisted to gate actions.
+    pub scope: Option<String>,
 }
 
 /// Build a provider ad-hoc and run a single fetch — used by the "Test
@@ -234,6 +243,13 @@ pub async fn test_provider(
     }
     let provider = providers::build(&config, secret, http).map_err(|e| e.to_string())?;
     let monitors = provider.fetch_monitors().await.map_err(|e| e.to_string())?;
+
+    // Probe token scope (Unknown until watch4.me#732 ships). Persist it for a saved
+    // provider so the popover can gate action buttons; skip for the "__test__" id.
+    let scope = provider.probe_scope().await.unwrap_or(providers::TokenScope::Unknown);
+    if config.id != "__test__" {
+        let _ = config::set_provider_scope(&app, &config.id, scope.as_config());
+    }
 
     // Healthchecks read-only keys redact the uuid (and ping_url/update_url), so
     // no monitor gets a per-check deep-link — every detail_url is just the base.
@@ -262,6 +278,7 @@ pub async fn test_provider(
     Ok(TestResult {
         count: monitors.len(),
         note,
+        scope: scope.as_config(),
     })
 }
 
@@ -274,6 +291,7 @@ pub fn upsert_provider(
     if config.id.is_empty() {
         config.id = uuid::Uuid::new_v4().to_string();
     }
+    let token_changed = matches!(&secret, Some(s) if !s.is_empty());
     if let Some(sec) = secret {
         if !sec.is_empty() {
             config::set_secret(&app, &config.id, &sec)?;
@@ -283,8 +301,14 @@ pub fn upsert_provider(
         let state = app.state::<AppState>();
         let mut configs = state.configs.lock().unwrap();
         if let Some(existing) = configs.iter_mut().find(|c| c.id == config.id) {
+            // Scope is server-owned, never sent by the form: preserve the stored
+            // value — unless the token changed, which invalidates it (→ unknown,
+            // re-probed on the next Test).
+            config.scope = if token_changed { None } else { existing.scope.clone() };
             *existing = config.clone();
         } else {
+            // New provider: scope starts unknown until probed.
+            config.scope = None;
             configs.push(config.clone());
         }
         config::save_configs(&app, configs.as_slice())?;
