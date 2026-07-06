@@ -17,7 +17,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_store::StoreExt;
 
 use crate::providers::{self, ProviderConfig};
@@ -157,6 +157,28 @@ pub fn save_configs(app: &AppHandle, configs: &[ProviderConfig]) -> Result<(), S
         serde_json::to_value(configs).map_err(|e| e.to_string())?,
     );
     store.save().map_err(|e| e.to_string())
+}
+
+/// The single write path for a provider's token scope. Updates the in-memory
+/// config + persists it, then emits `monitors:updated` so the popover's `writable`
+/// gating re-renders. Called by the scope probe (on Test) and by the 403 demotion.
+/// No-op if the value is unchanged (avoids a redundant save + emit).
+pub fn set_provider_scope(app: &AppHandle, id: &str, scope: Option<String>) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let configs = {
+        let mut configs = state.configs.lock().unwrap();
+        let Some(cfg) = configs.iter_mut().find(|c| c.id == id) else {
+            return Ok(());
+        };
+        if cfg.scope == scope {
+            return Ok(());
+        }
+        cfg.scope = scope;
+        configs.clone()
+    };
+    save_configs(app, &configs)?;
+    let _ = app.emit("monitors:updated", state.snapshot_view());
+    Ok(())
 }
 
 pub fn poll_interval(app: &AppHandle) -> u64 {
