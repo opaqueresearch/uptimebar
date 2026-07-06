@@ -16,6 +16,7 @@ interface MonitorView {
   provider_color: string | null;
   public_id: string | null;
   is_muted: boolean;
+  writable: boolean;
 }
 
 // Compact human duration since an ISO timestamp, e.g. "14m", "3h", "2d".

@@ -123,6 +123,15 @@ pub struct ProviderConfig {
     /// from the fixed palette). `None` falls back to the kind's default color.
     #[serde(default)]
     pub color: Option<String>,
+    /// Server-derived token scope: `"read"` | `"write"` | `None` (unknown). Set by
+    /// the scope probe / a 403 demotion, NOT by the settings form — `upsert_provider`
+    /// preserves the stored value. Drives whether monitor-action buttons render.
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// Default mute duration in seconds for this provider's monitors (`None` =
+    /// indefinite). Chosen once in settings; applied by the popover mute button.
+    #[serde(default)]
+    pub mute_default_secs: Option<u64>,
 }
 
 /// A write action a provider may support against one monitor. `Mute` carries an
@@ -133,6 +142,28 @@ pub enum MonitorAction {
     Resume,
     Mute { duration_secs: Option<u64> },
     Unmute,
+}
+
+/// A token's capability scope, as best the app can determine it.
+// Read/Write aren't constructed until the real scope probe lands (watch4.me#732);
+// the stub `probe_scope` only ever returns Unknown today.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TokenScope {
+    Read,
+    Write,
+    Unknown,
+}
+
+impl TokenScope {
+    /// The persisted string form (`ProviderConfig.scope`).
+    pub fn as_config(self) -> Option<String> {
+        match self {
+            TokenScope::Read => Some("read".into()),
+            TokenScope::Write => Some("write".into()),
+            TokenScope::Unknown => None,
+        }
+    }
 }
 
 /// The authoritative post-action state a provider reports, so the caller can
@@ -176,6 +207,15 @@ pub trait Provider: Send + Sync {
         Err(ProviderError::Config(
             "This provider doesn't support monitor actions.".into(),
         ))
+    }
+
+    /// Determine the token's scope up front (so the UI can gate write actions
+    /// before the user tries one). Defaults to `Unknown` — providers without a
+    /// scope-introspection endpoint rely on the runtime 403 instead. Watch4.me will
+    /// override this once its `GET /api/v1/token` ships (watch4.me#732); until then
+    /// it too returns `Unknown`.
+    async fn probe_scope(&self) -> Result<TokenScope, ProviderError> {
+        Ok(TokenScope::Unknown)
     }
 }
 
