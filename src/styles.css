@@ -231,6 +231,9 @@ body.popover {
 /* Hover-revealed monitor action buttons (pause/mute), right-aligned before the
    ↗ open-hint. When present, this cluster carries the margin-left:auto so both
    it and the hint sit on the right. */
+/* Action buttons (pause/mute) on the right. Hidden by default, revealed on row
+   hover — EXCEPT when the cluster is "active" (a button is engaged/pending/failed),
+   in which case it stays visible un-hovered so state is always in the same place. */
 .monitor-actions {
   display: flex;
   gap: 2px;
@@ -238,7 +241,8 @@ body.popover {
   opacity: 0;
   transition: opacity 0.1s ease;
 }
-.monitor:hover .monitor-actions {
+.monitor:hover .monitor-actions,
+.monitor-actions.has-active {
   opacity: 1;
 }
 /* With an action cluster present, the open-hint no longer needs to claim the auto
@@ -247,8 +251,37 @@ body.popover {
   margin-left: 6px;
 }
 .monitor-actions .btn-icon {
-  width: 26px;
-  height: 24px;
+  width: 22px;
+  height: 20px;
+}
+.monitor-actions .btn-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* When NOT engaged/pending/failed a button is dim (available). The engaged state
+   (paused/muted) highlights it so an active action reads at a glance — and since
+   the cluster is `has-active`, it stays visible without hovering. */
+.monitor-actions .btn-icon:not(.engaged):not(.pending):not(.failed) {
+  opacity: 0.55;
+}
+.monitor-actions .btn-icon:hover {
+  opacity: 1;
+}
+.monitor-actions .btn-icon.engaged {
+  opacity: 1;
+  color: var(--accent);
+  background: var(--accent-ring);
+  border-color: var(--accent);
+}
+.monitor-actions .btn-icon.pending {
+  opacity: 1;
+  color: var(--accent);
+}
+.monitor-actions .btn-icon.failed {
+  opacity: 1;
+  color: var(--down);
+  border-color: var(--down);
 }
 
 /* Transient inline notice under the header (e.g. read-only-token feedback). */
