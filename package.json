@@ -3,6 +3,8 @@
   "private": true,
   "version": "0.5.0",
   "type": "module",
+  "license": "Apache-2.0",
+  "author": "Opaque Research LLC",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
