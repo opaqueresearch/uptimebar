@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { ICONS, mkIcon } from "./icons";
 
 interface ProviderConfig {
   id: string;
@@ -30,30 +31,6 @@ const PALETTE: { name: string; hex: string }[] = [
 // Lucide icons (MIT), inlined as SVG so there's no dependency or network fetch.
 // 16px, currentColor stroke — they inherit the button's text color. Paths copied
 // verbatim from lucide.dev: refresh-cw (Test), pencil (Edit), trash-2 (Remove).
-const svg = (paths: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" ` +
-  `fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ` +
-  `stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
-
-const ICONS = {
-  test: svg(
-    `<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>` +
-      `<path d="M21 3v5h-5"/>` +
-      `<path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>` +
-      `<path d="M8 16H3v5"/>`,
-  ),
-  edit: svg(
-    `<path d="M21.174 6.812a1 1 0 0 0-3.986-3.986L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>` +
-      `<path d="m15 5 4 4"/>`,
-  ),
-  remove: svg(
-    `<path d="M3 6h18"/>` +
-      `<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>` +
-      `<path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>` +
-      `<line x1="10" x2="10" y1="11" y2="17"/>` +
-      `<line x1="14" x2="14" y1="11" y2="17"/>`,
-  ),
-};
 
 interface ProviderMeta {
   kind: string;
@@ -196,12 +173,31 @@ function showResult(kind: "ok" | "err" | "info", msg: string) {
   r.hidden = false;
 }
 
+// --- Token scope badge -------------------------------------------------------
+
+/// Show the token's scope next to the API-key label. `null`/unknown hides it
+/// (scope is only known after a Test / probe).
+function setScopeBadge(scope: string | null | undefined) {
+  const badge = el("scope-badge");
+  if (scope === "write") {
+    badge.textContent = "read+write";
+    badge.hidden = false;
+  } else if (scope === "read") {
+    badge.textContent = "read-only";
+    badge.hidden = false;
+  } else {
+    badge.hidden = true;
+  }
+}
+
 // --- Field metadata / visibility --------------------------------------------
 
 /// Reflect a provider kind's metadata into the form (visibility, help, links).
 /// Does NOT overwrite label/base values — callers decide that.
 function applyMeta(m: ProviderMeta) {
   el("kind-help").textContent = m.help;
+  // Mute-duration setting is Watch4.me-only (the only provider with a mute action).
+  show("mute-field", m.kind === "watch4me");
 
   const docs = el<HTMLAnchorElement>("docs-link");
   if (m.docs_url) {
@@ -255,6 +251,7 @@ function onKindChange() {
   el<HTMLInputElement>("extra").value = "";
   editingHasSavedKey = false; // switching kind in the dropdown = a fresh entry
   syncSecretField();
+  setScopeBadge(null); // scope unknown until this provider's token is tested
   clearResult();
   applyMeta(m);
   renderSwatches(); // the "Default" preview tracks the newly selected kind
@@ -275,8 +272,10 @@ function formValues(): { config: ProviderConfig; secret: string } {
       color: selectedColor,
       // scope is server-owned (upsert_provider ignores whatever we send here).
       scope: null,
-      // mute-duration dropdown is wired in the frontend-actions PR; null for now.
-      mute_default_secs: null,
+      mute_default_secs: (() => {
+        const v = el<HTMLSelectElement>("mute_default").value;
+        return v ? parseInt(v, 10) : null;
+      })(),
     },
     secret: el<HTMLInputElement>("secret").value,
   };
@@ -352,11 +351,14 @@ async function fillForm(p: ProviderConfig) {
   el<HTMLInputElement>("interval_secs").value = p.interval_secs?.toString() ?? "";
   el<HTMLInputElement>("extra").value = p.extra ?? "";
   el<HTMLInputElement>("secret").value = "";
+  el<HTMLSelectElement>("mute_default").value = p.mute_default_secs?.toString() ?? "";
   selectedColor = p.color ?? null;
   renderSwatches();
   hideSecret();
   editingHasSavedKey = await invoke<boolean>("provider_has_secret", { id: p.id });
   syncSecretField();
+  // Reflect the saved token scope (server-owned); re-probed on Test.
+  setScopeBadge(p.scope);
   el("form-title").textContent = `Edit ${p.label}`;
   el<HTMLButtonElement>("cancel").hidden = false;
   clearResult();
@@ -462,11 +464,15 @@ async function testRow(p: ProviderConfig, btn: HTMLButtonElement) {
   // Spin the refresh icon in place while the test runs (button stays compact).
   btn.classList.add("spinning");
   try {
-    const res = await invoke<{ count: number; note: string | null }>("test_provider", {
-      config: p,
-      secret: "",
-    });
-    const msg = `“${p.label}”: ${res.count} monitor${res.count === 1 ? "" : "s"}`;
+    const res = await invoke<{ count: number; note: string | null; scope: string | null }>(
+      "test_provider",
+      { config: p, secret: "" },
+    );
+    const scopeLabel =
+      res.scope === "write" ? "read+write" : res.scope === "read" ? "read-only" : null;
+    const msg =
+      `“${p.label}”: ${res.count} monitor${res.count === 1 ? "" : "s"}` +
+      (scopeLabel ? ` · ${scopeLabel}` : "");
     if (res.note) toast(`${msg} — ${res.note}`);
     else toast(`${msg} ✓`);
   } catch (e) {
@@ -521,18 +527,6 @@ async function loadProviders() {
       b.type = "button";
       b.className = `btn btn-sm ${cls}`.trim();
       b.textContent = text;
-      return b;
-    }
-
-    // Icon-only action button with a hover tooltip (the word). The SVG carries no
-    // text, so the title + aria-label keep it labeled/accessible.
-    function mkIcon(svg: string, title: string, cls: string): HTMLButtonElement {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = `btn btn-icon btn-sm ${cls}`.trim();
-      b.innerHTML = svg;
-      b.title = title;
-      b.setAttribute("aria-label", title);
       return b;
     }
 
@@ -595,7 +589,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     });
   }
   // Typing a key (or clearing it) flips the placeholder/Show-button state.
-  el("secret").addEventListener("input", syncSecretField);
+  el("secret").addEventListener("input", () => {
+    syncSecretField();
+    // A newly-typed token invalidates the known scope — badge goes to unknown
+    // until the next Test. (Blank = keeping the saved key, so leave the badge.)
+    if (el<HTMLInputElement>("secret").value !== "") setScopeBadge(null);
+  });
 
   el("test").addEventListener("click", async () => {
     const { config, secret } = formValues();
@@ -604,10 +603,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (p && !(config.id && p.includes("API key"))) return showResult("err", p);
     showResult("info", "Testing connection…");
     try {
-      const res = await invoke<{ count: number; note: string | null }>("test_provider", {
-        config,
-        secret,
-      });
+      const res = await invoke<{ count: number; note: string | null; scope: string | null }>(
+        "test_provider",
+        { config, secret },
+      );
+      setScopeBadge(res.scope);
       const base = `Connected — found ${res.count} monitor${res.count === 1 ? "" : "s"}.`;
       // A note (e.g. Healthchecks read-only key) is advisory, not an error.
       if (res.note) showResult("info", `${base} ${res.note}`);

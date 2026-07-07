@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { ICONS, mkIcon } from "./icons";
 
 type Status = "up" | "down" | "paused" | "unknown";
 
@@ -133,6 +134,68 @@ interface Detail {
 }
 const detail = new Map<string, Detail>();
 
+// Transient inline banner (the popover has no toast). Auto-hides after a few
+// seconds; the newest message replaces any prior one.
+let noticeTimer: number | undefined;
+function showNotice(msg: string) {
+  const el = document.getElementById("notice") as HTMLElement | null;
+  if (!el) return;
+  el.textContent = msg;
+  el.hidden = false;
+  if (noticeTimer) clearTimeout(noticeTimer);
+  noticeTimer = window.setTimeout(() => {
+    el.hidden = true;
+  }, 6000);
+}
+
+// Fire a monitor action (pause/resume/mute/unmute). On success the backend emits
+// monitors:updated, which re-renders. A read-only token comes back as
+// "insufficient_scope" — surface the notice; the backend has already demoted the
+// scope so the buttons will vanish on the next render.
+async function runAction(
+  m: MonitorView,
+  action: "pause" | "resume" | "mute" | "unmute",
+  btn: HTMLButtonElement,
+) {
+  if (!m.public_id) return;
+  btn.disabled = true;
+  btn.classList.add("spinning");
+  try {
+    await invoke("monitor_action", {
+      providerId: providerId(m),
+      publicId: m.public_id,
+      action,
+      durationSecs: action === "mute" ? muteDurationSecs() : null,
+    });
+  } catch (e) {
+    if (String(e).includes("insufficient_scope")) {
+      showNotice("Read-only token — open Settings to use a read+write token for actions.");
+    } else {
+      showNotice(`Action failed: ${e}`);
+    }
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove("spinning");
+  }
+}
+
+// The default mute duration configured for the (Watch4.me) provider, in seconds,
+// or null for indefinite. Populated from get_providers on load / config change.
+let muteDefaultSecs: number | null = null;
+const muteDurationSecs = () => muteDefaultSecs;
+
+async function loadMuteDefault() {
+  try {
+    const configs = await invoke<Array<{ kind: string; mute_default_secs: number | null }>>(
+      "get_providers",
+    );
+    const w4m = configs.find((c) => c.kind === "watch4me");
+    muteDefaultSecs = w4m?.mute_default_secs ?? null;
+  } catch {
+    muteDefaultSecs = null;
+  }
+}
+
 function monitorRow(m: MonitorView): HTMLLIElement {
   const li = document.createElement("li");
   li.className = "monitor";
@@ -179,6 +242,29 @@ function monitorRow(m: MonitorView): HTMLLIElement {
   if (det?.history) {
     const spark = sparkline(det.history);
     if (spark) li.append(spark);
+  }
+
+  // Hover-revealed action buttons (Watch4.me, write-scoped). stopPropagation keeps
+  // a click on a button from also triggering the row's open-in-browser handler.
+  if (m.writable && m.public_id) {
+    const actions = document.createElement("div");
+    actions.className = "monitor-actions";
+
+    const paused = m.status === "paused";
+    const pauseBtn = mkIcon(paused ? ICONS.play : ICONS.pause, paused ? "Resume" : "Pause");
+    pauseBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void runAction(m, paused ? "resume" : "pause", pauseBtn);
+    });
+
+    const muteBtn = mkIcon(m.is_muted ? ICONS.unmute : ICONS.mute, m.is_muted ? "Unmute" : "Mute");
+    muteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void runAction(m, m.is_muted ? "unmute" : "mute", muteBtn);
+    });
+
+    actions.append(pauseBtn, muteBtn);
+    li.append(actions);
   }
 
   if (m.detail_url) {
@@ -448,6 +534,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   updateSegments();
+  await loadMuteDefault();
   await refresh();
   await loadDetail();
   // The popover is hidden/shown (not reloaded); refresh detail each time a human
