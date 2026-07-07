@@ -70,6 +70,9 @@ pub struct Transition {
     pub monitor_name: String,
     pub provider_label: String,
     pub new_status: MonitorStatus,
+    /// Whether the monitor is muted at the provider — the poller skips the
+    /// notification for muted monitors when the "silence muted" setting is on.
+    pub is_muted: bool,
 }
 
 /// Cached on-demand provider detail (latency/uptime). The popover re-requests
@@ -210,6 +213,7 @@ impl AppState {
                                     monitor_name: m.name.clone(),
                                     provider_label: provider_label.to_string(),
                                     new_status,
+                                    is_muted: m.is_muted,
                                 });
                             }
                         }

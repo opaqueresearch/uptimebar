@@ -27,6 +27,7 @@ const STORE_FILE: &str = "settings.json";
 const PROVIDERS_KEY: &str = "providers";
 const INTERVAL_KEY: &str = "poll_interval_secs";
 const BROWSER_KEY: &str = "browser_app";
+const SILENCE_MUTED_KEY: &str = "silence_muted";
 const SECRETS_FILE: &str = "secrets.json";
 
 /// Keychain service name (the app identifier); each provider id is an account.
@@ -202,6 +203,22 @@ pub fn browser_app(app: &AppHandle) -> String {
 pub fn set_browser_app(app: &AppHandle, value: &str) -> Result<(), String> {
     let store = app.store(STORE_FILE).map_err(|e| e.to_string())?;
     store.set(BROWSER_KEY, serde_json::Value::String(value.to_string()));
+    store.save().map_err(|e| e.to_string())
+}
+
+/// Whether to suppress UptimeBar notifications for monitors muted at the provider.
+/// Defaults to **true** (mute-means-mute) when unset.
+pub fn silence_muted(app: &AppHandle) -> bool {
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|s| s.get(SILENCE_MUTED_KEY))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+}
+
+pub fn set_silence_muted(app: &AppHandle, value: bool) -> Result<(), String> {
+    let store = app.store(STORE_FILE).map_err(|e| e.to_string())?;
+    store.set(SILENCE_MUTED_KEY, serde_json::Value::Bool(value));
     store.save().map_err(|e| e.to_string())
 }
 

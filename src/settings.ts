@@ -440,6 +440,20 @@ async function loadBrowsers() {
   });
 }
 
+/// Reflect + persist the "silence notifications for muted monitors" toggle.
+async function loadSilenceMuted() {
+  const box = el<HTMLInputElement>("silence-muted");
+  box.checked = await invoke<boolean>("get_silence_muted");
+  box.addEventListener("change", async () => {
+    try {
+      await invoke("set_silence_muted", { value: box.checked });
+      toast(box.checked ? "Muted monitors silenced." : "Muted monitors will notify.");
+    } catch (e) {
+      showResult("err", `Couldn't save: ${e}`);
+    }
+  });
+}
+
 /// Test a saved provider straight from its list row, using the stored key (the
 /// backend falls back to the keychain when the passed secret is empty). Gives
 /// quick feedback without opening the edit form and scrolling to Test.
@@ -570,6 +584,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   await loadKinds();
   await loadProviders();
   await loadBrowsers();
+  await loadSilenceMuted();
   renderSwatches();
 
   // Live validation + clear stale results as the user types.
