@@ -112,6 +112,24 @@ const byStatusThenName = (a: MonitorView, b: MonitorView) =>
 const providerId = (m: MonitorView) => m.key.slice(0, m.key.indexOf(":"));
 
 let current: MonitorView[] = [];
+
+// Frozen display order: captured when the popover opens/refreshes and held stable
+// the whole time it's open, so acting on a monitor (or a live status change) never
+// reshuffles rows under the user — the status DOT recolors in place instead. The
+// map is monitor-key -> sort index; new keys not in it sort after, by status+name.
+let orderIndex = new Map<string, number>();
+const orderOf = (m: MonitorView) => orderIndex.get(m.key) ?? Number.MAX_SAFE_INTEGER;
+
+// Sort by the frozen order first, then status+name for any not-yet-captured rows.
+const byFrozenOrder = (a: MonitorView, b: MonitorView) =>
+  orderOf(a) - orderOf(b) || byStatusThenName(a, b);
+
+// Recompute the frozen order from `current` using the live status+name sort. Called
+// only on open/refresh — never on a background `monitors:updated`.
+function captureOrder() {
+  const sorted = [...current].sort(byStatusThenName);
+  orderIndex = new Map(sorted.map((m, i) => [m.key, i]));
+}
 let groupMode: "status" | "provider" =
   localStorage.getItem("uptimebar.group") === "provider" ? "provider" : "status";
 let filterMode: "all" | "problems" =
@@ -148,16 +166,27 @@ function showNotice(msg: string) {
   }, 6000);
 }
 
-// Fire a monitor action (pause/resume/mute/unmute). On success the backend emits
-// monitors:updated, which re-renders. A read-only token comes back as
-// "insufficient_scope" — surface the notice; the backend has already demoted the
-// scope so the buttons will vanish on the next render.
+// Per-monitor action state, so each row shows a PERSISTENT (not hover-only)
+// indicator through the action lifecycle: pending (spinner) while in flight, and
+// failed (⚠) if the call errored. Success clears both — the persistent paused/muted
+// icons then come from the monitor's own is_paused/is_muted state. Keyed by monitor
+// key so it survives re-renders.
+const actionPending = new Set<string>();
+const actionFailed = new Set<string>();
+
+// Fire a monitor action (pause/resume/mute/unmute). Sets a persistent pending
+// indicator immediately (instant feedback despite round-trip lag), clears it on
+// settle. On success the backend emits monitors:updated, which re-renders with the
+// new paused/muted state. A read-only token comes back as "insufficient_scope".
 async function runAction(
   m: MonitorView,
   action: "pause" | "resume" | "mute" | "unmute",
   btn: HTMLButtonElement,
 ) {
   if (!m.public_id) return;
+  actionPending.add(m.key);
+  actionFailed.delete(m.key);
+  draw(); // show the pending indicator right away, no reshuffle (order is frozen)
   btn.disabled = true;
   btn.classList.add("spinning");
   try {
@@ -167,16 +196,33 @@ async function runAction(
       action,
       durationSecs: action === "mute" ? muteDurationSecs() : null,
     });
+    // Success: the backend emit will re-render with the new paused/muted state.
   } catch (e) {
+    actionFailed.add(m.key);
     if (String(e).includes("insufficient_scope")) {
       showNotice("Read-only token — open Settings to use a read+write token for actions.");
     } else {
       showNotice(`Action failed: ${e}`);
     }
   } finally {
+    actionPending.delete(m.key);
     btn.disabled = false;
     btn.classList.remove("spinning");
+    draw(); // settle: clear the pending spinner / show the failed marker
   }
+}
+
+// Tag an action button with its lifecycle state so CSS can (a) keep it visible
+// un-hovered and (b) style it: `engaged` = the action is on (paused/muted),
+// `pending` = in flight (spinner), `failed` = last attempt errored.
+function applyActionState(
+  btn: HTMLButtonElement,
+  s: { engaged: boolean; pending: boolean; failed: boolean },
+) {
+  btn.classList.toggle("engaged", s.engaged);
+  btn.classList.toggle("pending", s.pending);
+  btn.classList.toggle("failed", s.failed);
+  if (s.pending) btn.classList.add("spinning");
 }
 
 // The default mute duration configured for the (Watch4.me) provider, in seconds,
@@ -244,25 +290,44 @@ function monitorRow(m: MonitorView): HTMLLIElement {
     if (spark) li.append(spark);
   }
 
-  // Hover-revealed action buttons (Watch4.me, write-scoped). stopPropagation keeps
-  // a click on a button from also triggering the row's open-in-browser handler.
+  // Action buttons (Watch4.me, write-scoped). Each button IS the state indicator
+  // for its action AND the way to change it — one control, always in the same
+  // place. Normally hover-revealed; but a button whose action is "engaged"
+  // (paused/muted), in flight (pending), or just failed STAYS visible + styled
+  // even un-hovered, so you can see and undo state without hunting. stopPropagation
+  // keeps a button click from also triggering the row's open-in-browser handler.
   if (m.writable && m.public_id) {
     const actions = document.createElement("div");
     actions.className = "monitor-actions";
+    const pending = actionPending.has(m.key);
+    const failed = actionFailed.has(m.key);
 
+    // Pause/resume: engaged when paused (shows ▶ resume, stays visible + highlighted).
     const paused = m.status === "paused";
-    const pauseBtn = mkIcon(paused ? ICONS.play : ICONS.pause, paused ? "Resume" : "Pause");
+    const pauseBtn = mkIcon(
+      pending ? ICONS.spinner : paused ? ICONS.play : ICONS.pause,
+      paused ? "Resume" : "Pause",
+    );
+    applyActionState(pauseBtn, { engaged: paused, pending, failed });
     pauseBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       void runAction(m, paused ? "resume" : "pause", pauseBtn);
     });
 
-    const muteBtn = mkIcon(m.is_muted ? ICONS.unmute : ICONS.mute, m.is_muted ? "Unmute" : "Mute");
+    // Mute/unmute: engaged when muted (bell stays visible + highlighted).
+    const muteBtn = mkIcon(
+      m.is_muted ? ICONS.unmute : ICONS.mute,
+      m.is_muted ? "Unmute" : "Mute",
+    );
+    applyActionState(muteBtn, { engaged: m.is_muted, pending: false, failed: false });
     muteBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       void runAction(m, m.is_muted ? "unmute" : "mute", muteBtn);
     });
 
+    // If any button is in a keep-visible state, mark the cluster so CSS shows it
+    // even when the row isn't hovered.
+    if (paused || m.is_muted || pending || failed) actions.classList.add("has-active");
     actions.append(pauseBtn, muteBtn);
     li.append(actions);
   }
@@ -379,19 +444,22 @@ function drawList() {
       g.items.push(m);
       if (filterMode === "all" || isProblem(m)) g.shown.push(m);
     }
-    // Services with outages first, then alphabetical.
-    const ordered = [...groups.values()].sort((a, b) => {
-      const ad = a.items.some((m) => m.status === "down") ? 0 : 1;
-      const bd = b.items.some((m) => m.status === "down") ? 0 : 1;
-      return ad - bd || a.label.toLowerCase().localeCompare(b.label.toLowerCase());
-    });
+    // Frozen order: a group sorts by the earliest frozen index among its monitors
+    // (the group that was on top when captured stays on top), so groups don't
+    // reshuffle mid-interaction either. Rows within a group use the same frozen order.
+    const groupRank = (items: MonitorView[]) => Math.min(...items.map(orderOf));
+    const ordered = [...groups.values()].sort(
+      (a, b) =>
+        groupRank(a.items) - groupRank(b.items) ||
+        a.label.toLowerCase().localeCompare(b.label.toLowerCase()),
+    );
     for (const g of ordered) {
       if (g.shown.length === 0) continue; // hide groups with nothing to show
       list.append(groupHeader(g.label, g.kind, g.items));
-      for (const m of [...g.shown].sort(byStatusThenName)) list.append(monitorRow(m));
+      for (const m of [...g.shown].sort(byFrozenOrder)) list.append(monitorRow(m));
     }
   } else {
-    for (const m of [...visible].sort(byStatusThenName)) list.append(monitorRow(m));
+    for (const m of [...visible].sort(byFrozenOrder)) list.append(monitorRow(m));
   }
 }
 
@@ -439,8 +507,14 @@ function updateSegments() {
   });
 }
 
+// A full refresh (initial load, manual ⌘R, or popover re-shown) re-captures the
+// frozen order, then draws. Background `monitors:updated` events use setMonitors
+// directly, which does NOT re-capture — so live changes recolor rows in place.
 async function refresh() {
-  setMonitors(await invoke<MonitorView[]>("get_monitors"));
+  current = await invoke<MonitorView[]>("get_monitors");
+  lastSync = Date.now();
+  captureOrder();
+  draw();
 }
 
 // Tier-3: fetch rich detail (latency, uptime %) for each provider on demand and
@@ -537,10 +611,11 @@ window.addEventListener("DOMContentLoaded", async () => {
   await loadMuteDefault();
   await refresh();
   await loadDetail();
-  // The popover is hidden/shown (not reloaded); refresh detail each time a human
-  // brings it to the front, so latency/uptime are current when viewed.
+  // The popover is hidden/shown (not reloaded). Each time a human brings it to the
+  // front, re-capture the frozen order (a fresh look re-sorts by current status)
+  // and refresh detail, so latency/uptime + ordering are current when viewed.
   window.addEventListener("focus", () => {
-    void loadDetail();
+    void refresh().then(() => loadDetail());
   });
   await listen<MonitorView[]>("monitors:updated", (e) => setMonitors(e.payload));
 });
