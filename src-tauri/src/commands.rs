@@ -44,6 +44,16 @@ pub fn set_browser_app(app: AppHandle, value: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn get_silence_muted(app: AppHandle) -> bool {
+    config::silence_muted(&app)
+}
+
+#[tauri::command]
+pub fn set_silence_muted(app: AppHandle, value: bool) -> Result<(), String> {
+    config::set_silence_muted(&app, value)
+}
+
+#[tauri::command]
 pub fn get_monitors(state: State<AppState>) -> Vec<MonitorView> {
     state.snapshot_view()
 }
