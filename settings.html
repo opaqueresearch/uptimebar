@@ -100,7 +100,10 @@
           </div>
 
           <div class="form-row" id="secret-field">
-            <label for="secret">API Key <span class="req" id="secret-req" hidden>Required</span></label>
+            <label for="secret">API Key
+              <span class="req" id="secret-req" hidden>Required</span>
+              <span class="scope-badge" id="scope-badge" hidden></span>
+            </label>
             <div class="form-control">
               <div class="secret-input">
                 <input id="secret" type="password" placeholder="Paste your key"
@@ -119,6 +122,21 @@
                 <input id="interval_secs" type="number" min="10" placeholder="60" />
                 <span class="suffix">seconds</span>
               </div>
+            </div>
+          </div>
+
+          <div class="form-row" id="mute-field" hidden>
+            <label for="mute_default">Default mute</label>
+            <div class="form-control">
+              <div class="select-wrap">
+                <select id="mute_default">
+                  <option value="">Indefinite</option>
+                  <option value="1800">30 minutes</option>
+                  <option value="3600">1 hour</option>
+                  <option value="28800">8 hours</option>
+                </select>
+              </div>
+              <p class="field-help">How long the menu's Mute button silences a monitor.</p>
             </div>
           </div>
 
