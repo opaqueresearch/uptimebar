@@ -145,9 +145,6 @@ pub enum MonitorAction {
 }
 
 /// A token's capability scope, as best the app can determine it.
-// Read/Write aren't constructed until the real scope probe lands (watch4.me#732);
-// the stub `probe_scope` only ever returns Unknown today.
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TokenScope {
     Read,
