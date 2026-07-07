@@ -19,6 +19,7 @@ use std::sync::Mutex;
 
 use super::{
     ActionOutcome, Monitor, MonitorAction, MonitorStatus, Provider, ProviderConfig, ProviderError,
+    TokenScope,
 };
 
 pub struct Watch4Me {
@@ -273,6 +274,37 @@ impl Provider for Watch4Me {
             changed: result.changed,
         })
     }
+
+    async fn probe_scope(&self) -> Result<TokenScope, ProviderError> {
+        // GET /api/v1/token → { "scope": "read" | "write", ... } (watch4.me#732).
+        // Authoritative token scope so the UI can gate actions before a 403.
+        // Any error (network, 401, unexpected body) → Unknown, never blocks.
+        let resp = self
+            .http
+            .get(format!("{}/api/v1/token/", self.base))
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/json")
+            .send()
+            .await;
+        let Ok(resp) = resp else {
+            return Ok(TokenScope::Unknown);
+        };
+        if !resp.status().is_success() {
+            return Ok(TokenScope::Unknown);
+        }
+        match resp.json::<TokenInfo>().await {
+            Ok(t) if t.scope == "write" => Ok(TokenScope::Write),
+            Ok(t) if t.scope == "read" => Ok(TokenScope::Read),
+            _ => Ok(TokenScope::Unknown),
+        }
+    }
+}
+
+/// The subset of `GET /api/v1/token` we need — the token's scope.
+#[derive(serde::Deserialize)]
+struct TokenInfo {
+    #[serde(default)]
+    scope: String,
 }
 
 /// Watch4.me action success body (union of pause/resume + mute/unmute shapes).
