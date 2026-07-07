@@ -228,6 +228,41 @@ body.popover {
   opacity: 1;
 }
 
+/* Hover-revealed monitor action buttons (pause/mute), right-aligned before the
+   ↗ open-hint. When present, this cluster carries the margin-left:auto so both
+   it and the hint sit on the right. */
+.monitor-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.monitor:hover .monitor-actions {
+  opacity: 1;
+}
+/* With an action cluster present, the open-hint no longer needs to claim the auto
+   margin (the cluster already did). */
+.monitor-actions ~ .open-hint {
+  margin-left: 6px;
+}
+.monitor-actions .btn-icon {
+  width: 26px;
+  height: 24px;
+}
+
+/* Transient inline notice under the header (e.g. read-only-token feedback). */
+.notice {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-bottom: 1px solid var(--border);
+}
+.notice[hidden] {
+  display: none;
+}
+
 .dot {
   width: 10px;
   height: 10px;
@@ -447,7 +482,8 @@ body.settings {
   gap: 6px;
   min-width: 0;
 }
-.form-control input {
+/* Text-like inputs fill the control; checkboxes keep their natural size. */
+.form-control input:not([type="checkbox"]) {
   background: var(--bg-input);
   border: 1px solid var(--border-strong);
   border-radius: 6px;
@@ -457,7 +493,7 @@ body.settings {
   width: 100%;
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
-.form-control input:focus {
+.form-control input:not([type="checkbox"]):focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-ring);
@@ -563,6 +599,22 @@ body.settings {
   font-weight: 500;
   color: var(--muted);
   margin-left: 4px;
+}
+/* Token scope pill next to the API-key label (read-only / read+write). */
+.scope-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-left: 6px;
+}
+.scope-badge[hidden] {
+  display: none;
 }
 
 .inline {
