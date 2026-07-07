@@ -68,7 +68,12 @@ pub async fn poll_once(app: &AppHandle) {
             }
         }
 
+        // Suppress notifications for muted monitors when the setting is on (default).
+        let silence_muted = crate::config::silence_muted(app);
         for t in &transitions {
+            if silence_muted && t.is_muted {
+                continue;
+            }
             crate::notify::fire(app, t);
         }
     }

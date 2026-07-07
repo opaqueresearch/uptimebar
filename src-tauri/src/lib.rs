@@ -62,6 +62,8 @@ pub fn run() {
             commands::get_browsers,
             commands::get_browser_app,
             commands::set_browser_app,
+            commands::get_silence_muted,
+            commands::set_silence_muted,
             commands::test_provider,
             commands::upsert_provider,
             commands::delete_provider,

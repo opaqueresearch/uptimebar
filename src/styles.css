@@ -466,6 +466,19 @@ body.settings {
   color: #6a6c76;
 }
 
+/* Inline checkbox + label (e.g. "silence muted monitors") */
+.check-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.check-line input {
+  margin: 0;
+  cursor: pointer;
+}
+
 /* API-key field with a Show/Hide reveal toggle */
 .secret-input {
   display: flex;
