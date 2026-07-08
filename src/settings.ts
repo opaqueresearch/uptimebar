@@ -517,6 +517,18 @@ async function loadProviders() {
     if (!hasSecret) sub.classList.add("warn");
     info.append(name, sub);
 
+    // Compact token-scope tag (RW / RO) on the name line, so read-only vs
+    // read+write is visible at a glance without opening the edit form. Only when
+    // the scope is known (probed); a tooltip spells it out.
+    if (hasSecret && (p.scope === "write" || p.scope === "read")) {
+      const tag = document.createElement("span");
+      const rw = p.scope === "write";
+      tag.className = `scope-tag ${rw ? "rw" : "ro"}`;
+      tag.textContent = rw ? "RW" : "RO";
+      tag.title = rw ? "Read + write token" : "Read-only token";
+      name.append(tag);
+    }
+
     // Inline two-step confirm (no native dialogs in this webview).
     const btns = document.createElement("div");
     btns.className = "provider-actions";
@@ -580,6 +592,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   await loadBrowsers();
   await loadSilenceMuted();
   renderSwatches();
+  // Probe token scopes in the background, then refresh the list so each provider
+  // row shows read-only/read+write without the user running Test Connection.
+  void invoke("refresh_scopes").then(() => loadProviders());
 
   // Live validation + clear stale results as the user types.
   for (const id of ["label", "base_url", "secret", "interval_secs"]) {
@@ -647,5 +662,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     input.type = reveal ? "text" : "password";
     toggle.textContent = reveal ? "Hide" : "Show";
     toggle.setAttribute("aria-label", reveal ? "Hide key" : "Show key");
+  });
+
+  // The settings window is hidden (not destroyed) between opens, so a left-open
+  // add/edit form would otherwise persist. Reset to the main view each time the
+  // window is re-shown, and refresh the provider list so it reflects any changes.
+  window.addEventListener("focus", () => {
+    resetForm();
+    void invoke("refresh_scopes").then(() => loadProviders());
   });
 });

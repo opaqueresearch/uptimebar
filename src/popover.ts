@@ -17,7 +17,8 @@ interface MonitorView {
   provider_color: string | null;
   public_id: string | null;
   is_muted: boolean;
-  writable: boolean;
+  actionable: boolean; // provider supports actions (Watch4.me + public_id)
+  token_scope: string; // "write" | "read" | "unknown"
 }
 
 // Compact human duration since an ISO timestamp, e.g. "14m", "3h", "2d".
@@ -166,29 +167,24 @@ function showNotice(msg: string) {
   }, 6000);
 }
 
-// Per-monitor action state, so each row shows a PERSISTENT (not hover-only)
-// indicator through the action lifecycle: pending (spinner) while in flight, and
-// failed (⚠) if the call errored. Success clears both — the persistent paused/muted
-// icons then come from the monitor's own is_paused/is_muted state. Keyed by monitor
-// key so it survives re-renders.
-const actionPending = new Set<string>();
-const actionFailed = new Set<string>();
+// Which CONTROL on a row has an action in flight — so ONLY the clicked button
+// spins, not its sibling. Keyed by monitor key → "pause" (pause/resume control) or
+// "mute" (mute/unmute control). State (paused/muted) itself is NOT tracked locally;
+// it comes from the backend's monitors:updated emit after the action succeeds, so
+// the UI never shows a state the server rejected.
+type Control = "pause" | "mute";
+const actionPending = new Map<string, Control>();
+const pendingControl = (key: string): Control | undefined => actionPending.get(key);
 
-// Fire a monitor action (pause/resume/mute/unmute). Sets a persistent pending
-// indicator immediately (instant feedback despite round-trip lag), clears it on
-// settle. On success the backend emits monitors:updated, which re-renders with the
-// new paused/muted state. A read-only token comes back as "insufficient_scope".
-async function runAction(
-  m: MonitorView,
-  action: "pause" | "resume" | "mute" | "unmute",
-  btn: HTMLButtonElement,
-) {
+// Fire a monitor action (pause/resume/mute/unmute). Shows a pending spinner on the
+// clicked control immediately (instant feedback despite round-trip lag). On success
+// the backend emits monitors:updated → re-render with the real new state. On failure
+// NOTHING local changes — the transient notice explains it and the row is unchanged.
+async function runAction(m: MonitorView, action: "pause" | "resume" | "mute" | "unmute") {
   if (!m.public_id) return;
-  actionPending.add(m.key);
-  actionFailed.delete(m.key);
-  draw(); // show the pending indicator right away, no reshuffle (order is frozen)
-  btn.disabled = true;
-  btn.classList.add("spinning");
+  const control: Control = action === "pause" || action === "resume" ? "pause" : "mute";
+  actionPending.set(m.key, control);
+  draw(); // show the pending spinner right away (order is frozen, no reshuffle)
   try {
     await invoke("monitor_action", {
       providerId: providerId(m),
@@ -196,33 +192,50 @@ async function runAction(
       action,
       durationSecs: action === "mute" ? muteDurationSecs() : null,
     });
-    // Success: the backend emit will re-render with the new paused/muted state.
+    // Success: the backend emit re-renders with the new paused/muted state.
   } catch (e) {
-    actionFailed.add(m.key);
     if (String(e).includes("insufficient_scope")) {
-      showNotice("Read-only token — open Settings to use a read+write token for actions.");
+      showNotice("Read-only token — add a read+write token in Settings to control monitors.");
     } else {
       showNotice(`Action failed: ${e}`);
     }
+    // No local state change on failure — the row stays exactly as it was.
   } finally {
     actionPending.delete(m.key);
-    btn.disabled = false;
-    btn.classList.remove("spinning");
-    draw(); // settle: clear the pending spinner / show the failed marker
+    draw();
   }
 }
 
-// Tag an action button with its lifecycle state so CSS can (a) keep it visible
-// un-hovered and (b) style it: `engaged` = the action is on (paused/muted),
-// `pending` = in flight (spinner), `failed` = last attempt errored.
-function applyActionState(
-  btn: HTMLButtonElement,
-  s: { engaged: boolean; pending: boolean; failed: boolean },
-) {
-  btn.classList.toggle("engaged", s.engaged);
-  btn.classList.toggle("pending", s.pending);
-  btn.classList.toggle("failed", s.failed);
-  if (s.pending) btn.classList.add("spinning");
+// Build one action button using the two-channel encoding:
+//   • icon SHAPE  = state (caller picks play/pause, bell/bell-slash)
+//   • .engaged    = the action is currently on → filled chip + always-visible
+//   • .read-only  = not clickable (dim + not-allowed cursor), but still shows state
+//   • .pending    = in flight (spinner)
+// A non-engaged button on a write token is hover-revealed; engaged (or read-only
+// showing a state) stays visible. No lingering "failed" color — failures surface
+// in the transient notice banner instead.
+function actionButton(o: {
+  icon: string;
+  engaged: boolean;
+  pending: boolean;
+  readOnly: boolean;
+  title: string;
+  onClick: () => void;
+}): HTMLButtonElement {
+  const b = mkIcon(o.icon, o.title);
+  b.classList.toggle("engaged", o.engaged);
+  b.classList.toggle("pending", o.pending);
+  if (o.pending) b.classList.add("spinning");
+  if (o.readOnly) {
+    b.classList.add("read-only");
+    b.setAttribute("aria-disabled", "true");
+  }
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (o.readOnly || o.pending) return; // non-interactive
+    o.onClick();
+  });
+  return b;
 }
 
 // The default mute duration configured for the (Watch4.me) provider, in seconds,
@@ -296,38 +309,50 @@ function monitorRow(m: MonitorView): HTMLLIElement {
   // (paused/muted), in flight (pending), or just failed STAYS visible + styled
   // even un-hovered, so you can see and undo state without hunting. stopPropagation
   // keeps a button click from also triggering the row's open-in-browser handler.
-  if (m.writable && m.public_id) {
+  if (m.actionable && m.public_id) {
     const actions = document.createElement("div");
     actions.className = "monitor-actions";
-    const pending = actionPending.has(m.key);
-    const failed = actionFailed.has(m.key);
-
-    // Pause/resume: engaged when paused (shows ▶ resume, stays visible + highlighted).
+    const busy = pendingControl(m.key); // which control is in flight, if any
+    // Read-only token: buttons are non-interactive but still SHOW state
+    // (a read-only user can see paused/muted without visiting the website).
+    const readOnly = m.token_scope === "read";
     const paused = m.status === "paused";
-    const pauseBtn = mkIcon(
-      pending ? ICONS.spinner : paused ? ICONS.play : ICONS.pause,
-      paused ? "Resume" : "Pause",
-    );
-    applyActionState(pauseBtn, { engaged: paused, pending, failed });
-    pauseBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void runAction(m, paused ? "resume" : "pause", pauseBtn);
+
+    // Pause/resume. Icon SHAPE encodes state (play=paused, pause=running);
+    // opacity/cursor encode actionability; a chip emphasizes engaged.
+    const pausePending = busy === "pause";
+    const pauseBtn = actionButton({
+      icon: pausePending ? ICONS.spinner : paused ? ICONS.play : ICONS.pause,
+      engaged: paused,
+      pending: pausePending,
+      readOnly,
+      title: readOnly
+        ? paused
+          ? "Paused — read+write token needed to change"
+          : "Read+write token needed to pause"
+        : paused
+          ? "Resume"
+          : "Pause",
+      onClick: () => runAction(m, paused ? "resume" : "pause"),
     });
 
-    // Mute/unmute: engaged when muted (bell stays visible + highlighted).
-    const muteBtn = mkIcon(
-      m.is_muted ? ICONS.unmute : ICONS.mute,
-      m.is_muted ? "Unmute" : "Mute",
-    );
-    applyActionState(muteBtn, { engaged: m.is_muted, pending: false, failed: false });
-    muteBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void runAction(m, m.is_muted ? "unmute" : "mute", muteBtn);
+    // Mute/unmute. bell-slash=muted, bell=alerting.
+    const mutePending = busy === "mute";
+    const muteBtn = actionButton({
+      icon: mutePending ? ICONS.spinner : m.is_muted ? ICONS.mute : ICONS.unmute,
+      engaged: m.is_muted,
+      pending: mutePending,
+      readOnly,
+      title: readOnly
+        ? m.is_muted
+          ? "Muted — read+write token needed to change"
+          : "Read+write token needed to mute"
+        : m.is_muted
+          ? "Unmute"
+          : "Mute",
+      onClick: () => runAction(m, m.is_muted ? "unmute" : "mute"),
     });
 
-    // If any button is in a keep-visible state, mark the cluster so CSS shows it
-    // even when the row isn't hovered.
-    if (paused || m.is_muted || pending || failed) actions.classList.add("has-active");
     actions.append(pauseBtn, muteBtn);
     li.append(actions);
   }
