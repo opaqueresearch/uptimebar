@@ -50,6 +50,7 @@ pub fn run() {
             commands::get_monitors,
             commands::get_provider_detail,
             commands::monitor_action,
+            commands::refresh_scopes,
             commands::get_providers,
             commands::get_provider_kinds,
             commands::provider_has_secret,
