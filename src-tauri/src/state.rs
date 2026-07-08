@@ -44,10 +44,15 @@ pub struct MonitorView {
     pub public_id: Option<String>,
     /// Whether the monitor's alerts are muted at the provider.
     pub is_muted: bool,
-    /// Whether monitor-action buttons should render for this row: the provider
-    /// supports actions AND its token isn't known to be read-only. (`unknown` scope
-    /// still renders — a runtime 403 demotes it to read and hides them.)
-    pub writable: bool,
+    /// Whether this provider supports monitor actions at all (currently Watch4.me
+    /// with a public_id). The buttons render when true; interactivity is gated
+    /// separately by `token_scope`.
+    pub actionable: bool,
+    /// The provider's token scope: `"write"` (actions work), `"read"` (actions
+    /// shown but disabled — token can't change state), or `"unknown"` (not yet
+    /// probed; treated as attemptable, a 403 demotes to read). Drives whether the
+    /// action buttons are clickable.
+    pub token_scope: String,
 }
 
 /// Aggregate counts used to drive the tray icon + tooltip.
@@ -329,11 +334,16 @@ impl AppState {
                 provider_color: colors.get(&r.provider_id).cloned().flatten(),
                 public_id: r.monitor.public_id.clone(),
                 is_muted: r.monitor.is_muted,
-                // Actions only on Watch4.me, and only if the token isn't known
-                // read-only. `public_id` must be present to address the action.
-                writable: r.provider_kind == "watch4me"
-                    && r.monitor.public_id.is_some()
-                    && scopes.get(&r.provider_id).cloned().flatten().as_deref() != Some("read"),
+                // Buttons render whenever the provider supports actions (Watch4.me
+                // + a public_id to address). Read-only vs write only changes whether
+                // they're clickable (token_scope), not whether they show — a
+                // read-only user still sees paused/muted STATE.
+                actionable: r.provider_kind == "watch4me" && r.monitor.public_id.is_some(),
+                token_scope: scopes
+                    .get(&r.provider_id)
+                    .cloned()
+                    .flatten()
+                    .unwrap_or_else(|| "unknown".to_string()),
             })
             .collect();
         // Down first, then unknown, paused, up; alphabetical within.
