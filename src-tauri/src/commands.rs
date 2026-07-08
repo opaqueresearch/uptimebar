@@ -102,6 +102,24 @@ pub async fn get_provider_detail(
     }
 }
 
+/// Probe + persist the token scope for every configured provider that supports it,
+/// so the settings provider list can show read-only/read+write without the user
+/// running Test Connection. Best-effort: errors leave scope unchanged (unknown).
+/// Called when the settings window opens.
+#[tauri::command]
+pub async fn refresh_scopes(app: AppHandle) {
+    let providers = {
+        let state = app.state::<AppState>();
+        let reg = state.registry.read().unwrap();
+        reg.iter().map(|p| (p.id().to_string(), p.clone())).collect::<Vec<_>>()
+    };
+    for (id, provider) in providers {
+        if let Ok(scope) = provider.probe_scope().await {
+            let _ = config::set_provider_scope(&app, &id, scope.as_config());
+        }
+    }
+}
+
 /// Perform a write action (pause/resume/mute/unmute) against one monitor. Keyed by
 /// the provider's native `public_id`. On success, applies the authoritative outcome
 /// locally + emits `monitors:updated` for instant feedback, then triggers a poll to
