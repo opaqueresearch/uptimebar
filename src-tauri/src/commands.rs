@@ -120,16 +120,16 @@ pub async fn refresh_scopes(app: AppHandle) {
     }
 }
 
-/// Perform a write action (pause/resume/mute/unmute) against one monitor. Keyed by
-/// the provider's native `public_id`. On success, applies the authoritative outcome
-/// locally + emits `monitors:updated` for instant feedback, then triggers a poll to
-/// reconcile. A read-only token yields `InsufficientScope`, which the frontend
-/// recognizes to hide the action buttons.
+/// Perform a write action (pause/resume/mute/unmute) against one monitor, keyed by
+/// its native `Monitor.id`. On success, applies the authoritative outcome locally +
+/// emits `monitors:updated` for instant feedback, then triggers a poll to reconcile.
+/// A read-only token yields `InsufficientScope`, which the frontend recognizes to
+/// hide the action buttons.
 #[tauri::command]
 pub async fn monitor_action(
     app: AppHandle,
     provider_id: String,
-    public_id: String,
+    monitor_id: String,
     action: String,
     duration_secs: Option<u64>,
 ) -> Result<(), String> {
@@ -151,7 +151,7 @@ pub async fn monitor_action(
         return Err("provider not found".into());
     };
 
-    let outcome = match provider.monitor_action(&public_id, act).await {
+    let outcome = match provider.monitor_action(&monitor_id, act).await {
         Ok(o) => o,
         Err(providers::ProviderError::InsufficientScope) => {
             // The token is read-only after all — demote the stored scope so the
@@ -169,7 +169,7 @@ pub async fn monitor_action(
     // Optimistic: apply the server's authoritative state + push it, then poll to
     // reconcile everything else.
     let state = app.state::<AppState>();
-    state.apply_action_outcome(&provider_id, &public_id, outcome.is_paused, outcome.is_muted);
+    state.apply_action_outcome(&provider_id, &monitor_id, outcome.is_paused, outcome.is_muted);
     let _ = app.emit("monitors:updated", state.snapshot_view());
     state.refresh.notify_one();
     Ok(())

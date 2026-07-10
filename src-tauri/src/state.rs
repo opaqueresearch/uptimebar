@@ -44,10 +44,11 @@ pub struct MonitorView {
     pub public_id: Option<String>,
     /// Whether the monitor's alerts are muted at the provider.
     pub is_muted: bool,
-    /// Whether this provider supports monitor actions at all (currently Watch4.me
-    /// with a public_id). The buttons render when true; interactivity is gated
-    /// separately by `token_scope`.
-    pub actionable: bool,
+    /// Whether this monitor's provider supports pause/resume (all action-capable
+    /// providers) — shows the pause button.
+    pub can_pause: bool,
+    /// Whether it supports mute/unmute (Watch4.me only) — shows the mute button.
+    pub can_mute: bool,
     /// The provider's token scope: `"write"` (actions work), `"read"` (actions
     /// shown but disabled — token can't change state), or `"unknown"` (not yet
     /// probed; treated as attemptable, a 403 demotes to read). Drives whether the
@@ -264,34 +265,29 @@ impl AppState {
     }
 
     /// Apply the authoritative post-action state to the matching row (by
-    /// provider + public_id), so the UI reflects a pause/mute immediately instead
-    /// of waiting for the next poll. `is_paused=true` maps the status to Paused;
-    /// `false` leaves the last non-paused status for the poller to reconcile.
+    /// provider + native monitor id), so the UI reflects a pause/mute immediately
+    /// instead of waiting for the next poll. `is_paused=true` maps the status to
+    /// Paused; `false` leaves the last non-paused status for the poller to reconcile.
     pub fn apply_action_outcome(
         &self,
         provider_id: &str,
-        public_id: &str,
+        monitor_id: &str,
         is_paused: Option<bool>,
         is_muted: Option<bool>,
     ) {
         let mut rows = self.rows.lock().unwrap();
-        for row in rows.values_mut() {
-            if row.provider_id == provider_id
-                && row.monitor.public_id.as_deref() == Some(public_id)
-            {
-                if let Some(muted) = is_muted {
-                    row.monitor.is_muted = muted;
+        if let Some(row) = rows.get_mut(&key(provider_id, monitor_id)) {
+            if let Some(muted) = is_muted {
+                row.monitor.is_muted = muted;
+            }
+            if let Some(paused) = is_paused {
+                if paused {
+                    row.monitor.status = MonitorStatus::Paused;
+                } else if row.monitor.status == MonitorStatus::Paused {
+                    // Resumed: drop back to Unknown until the next poll gives the
+                    // real up/down (avoids showing a stale Paused).
+                    row.monitor.status = MonitorStatus::Unknown;
                 }
-                if let Some(paused) = is_paused {
-                    if paused {
-                        row.monitor.status = MonitorStatus::Paused;
-                    } else if row.monitor.status == MonitorStatus::Paused {
-                        // Resumed: drop back to Unknown until the next poll gives
-                        // the real up/down (avoids showing a stale Paused).
-                        row.monitor.status = MonitorStatus::Unknown;
-                    }
-                }
-                break;
             }
         }
     }
@@ -319,6 +315,15 @@ impl AppState {
                 configs.iter().map(|c| (c.id.clone(), c.scope.clone())).collect(),
             )
         };
+        // Per-provider action capabilities (from the live adapters), so each row
+        // shows exactly the buttons its provider supports.
+        let caps: HashMap<String, crate::providers::ActionCaps> = self
+            .registry
+            .read()
+            .unwrap()
+            .iter()
+            .map(|p| (p.id().to_string(), p.capabilities()))
+            .collect();
         let mut out: Vec<MonitorView> = rows
             .iter()
             .map(|(k, r)| MonitorView {
@@ -334,11 +339,11 @@ impl AppState {
                 provider_color: colors.get(&r.provider_id).cloned().flatten(),
                 public_id: r.monitor.public_id.clone(),
                 is_muted: r.monitor.is_muted,
-                // Buttons render whenever the provider supports actions (Watch4.me
-                // + a public_id to address). Read-only vs write only changes whether
-                // they're clickable (token_scope), not whether they show — a
+                // Show exactly the buttons the provider supports. Read-only vs write
+                // only changes clickability (token_scope), not visibility — a
                 // read-only user still sees paused/muted STATE.
-                actionable: r.provider_kind == "watch4me" && r.monitor.public_id.is_some(),
+                can_pause: caps.get(&r.provider_id).map(|c| c.pause).unwrap_or(false),
+                can_mute: caps.get(&r.provider_id).map(|c| c.mute).unwrap_or(false),
                 token_scope: scopes
                     .get(&r.provider_id)
                     .cloned()

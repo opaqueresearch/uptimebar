@@ -144,6 +144,14 @@ pub enum MonitorAction {
     Unmute,
 }
 
+/// Which action controls a provider supports — drives which buttons the UI shows.
+/// Competitors have pause/resume but not mute (mute is Watch4.me-only).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ActionCaps {
+    pub pause: bool,
+    pub mute: bool,
+}
+
 /// A token's capability scope, as best the app can determine it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TokenScope {
@@ -192,18 +200,25 @@ pub trait Provider: Send + Sync {
         Ok(None)
     }
 
-    /// Perform a write action against one monitor (identified by its provider-native
-    /// public id). Returns the authoritative post-action state. Defaults to
-    /// unsupported so read-only adapters compile unchanged; only providers with an
-    /// action API (Watch4.me) override this.
+    /// Perform a write action against one monitor, identified by its native
+    /// `Monitor.id` (the same id used to key rows). Each adapter maps that to
+    /// whatever its own API needs (Watch4.me resolves id → public_id; the others
+    /// use the id directly). Returns the authoritative post-action state. Defaults
+    /// to unsupported so read-only adapters compile unchanged.
     async fn monitor_action(
         &self,
-        _public_id: &str,
+        _id: &str,
         _action: MonitorAction,
     ) -> Result<ActionOutcome, ProviderError> {
         Err(ProviderError::Config(
             "This provider doesn't support monitor actions.".into(),
         ))
+    }
+
+    /// Which actions this provider supports. Drives which buttons the UI shows.
+    /// Default: nothing. Providers override to advertise pause/resume and/or mute.
+    fn capabilities(&self) -> ActionCaps {
+        ActionCaps::default()
     }
 
     /// Determine the token's scope up front (so the UI can gate write actions

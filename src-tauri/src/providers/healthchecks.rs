@@ -159,4 +159,47 @@ impl Provider for Healthchecks {
             })
             .collect())
     }
+
+    fn capabilities(&self) -> super::ActionCaps {
+        // Pause/resume via /pause /resume (needs a read-write key). No mute.
+        super::ActionCaps { pause: true, mute: false }
+    }
+
+    async fn monitor_action(
+        &self,
+        id: &str,
+        action: super::MonitorAction,
+    ) -> Result<super::ActionOutcome, ProviderError> {
+        use super::MonitorAction;
+        // POST {base}/api/v3/checks/{uuid}/{pause|resume}. The read-write key is
+        // required — a read-only key redacts the uuid, so `id` here is a
+        // `unique_key` that these routes reject (surfaced as InsufficientScope).
+        let (verb, paused) = match action {
+            MonitorAction::Pause => ("pause", true),
+            MonitorAction::Resume => ("resume", false),
+            MonitorAction::Mute { .. } | MonitorAction::Unmute => {
+                return Err(ProviderError::Config("Healthchecks doesn't support mute.".into()));
+            }
+        };
+        let resp = self
+            .http
+            .post(format!("{}/api/v3/checks/{}/{}", self.base, id, verb))
+            .header("X-Api-Key", &self.api_key)
+            .header("Accept", "application/json")
+            .send()
+            .await?;
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            // A read-only key can't pause/resume.
+            return Err(ProviderError::InsufficientScope);
+        }
+        if !status.is_success() {
+            return Err(super::http_status_error(status));
+        }
+        Ok(super::ActionOutcome {
+            is_paused: Some(paused),
+            is_muted: None,
+            changed: true,
+        })
+    }
 }
