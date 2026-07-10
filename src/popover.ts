@@ -17,7 +17,8 @@ interface MonitorView {
   provider_color: string | null;
   public_id: string | null;
   is_muted: boolean;
-  actionable: boolean; // provider supports actions (Watch4.me + public_id)
+  can_pause: boolean; // provider supports pause/resume
+  can_mute: boolean; // provider supports mute/unmute (Watch4.me only)
   token_scope: string; // "write" | "read" | "unknown"
 }
 
@@ -111,6 +112,8 @@ const byStatusThenName = (a: MonitorView, b: MonitorView) =>
   a.name.toLowerCase().localeCompare(b.name.toLowerCase());
 
 const providerId = (m: MonitorView) => m.key.slice(0, m.key.indexOf(":"));
+// The native monitor id (the key is "{providerId}:{monitorId}"). Actions key on it.
+const monitorId = (m: MonitorView) => m.key.slice(m.key.indexOf(":") + 1);
 
 let current: MonitorView[] = [];
 
@@ -181,14 +184,13 @@ const pendingControl = (key: string): Control | undefined => actionPending.get(k
 // the backend emits monitors:updated → re-render with the real new state. On failure
 // NOTHING local changes — the transient notice explains it and the row is unchanged.
 async function runAction(m: MonitorView, action: "pause" | "resume" | "mute" | "unmute") {
-  if (!m.public_id) return;
   const control: Control = action === "pause" || action === "resume" ? "pause" : "mute";
   actionPending.set(m.key, control);
   draw(); // show the pending spinner right away (order is frozen, no reshuffle)
   try {
     await invoke("monitor_action", {
       providerId: providerId(m),
-      publicId: m.public_id,
+      monitorId: monitorId(m),
       action,
       durationSecs: action === "mute" ? muteDurationSecs() : null,
     });
@@ -309,51 +311,58 @@ function monitorRow(m: MonitorView): HTMLLIElement {
   // (paused/muted), in flight (pending), or just failed STAYS visible + styled
   // even un-hovered, so you can see and undo state without hunting. stopPropagation
   // keeps a button click from also triggering the row's open-in-browser handler.
-  if (m.actionable && m.public_id) {
+  if (m.can_pause || m.can_mute) {
     const actions = document.createElement("div");
     actions.className = "monitor-actions";
     const busy = pendingControl(m.key); // which control is in flight, if any
     // Read-only token: buttons are non-interactive but still SHOW state
     // (a read-only user can see paused/muted without visiting the website).
     const readOnly = m.token_scope === "read";
-    const paused = m.status === "paused";
 
-    // Pause/resume. Icon SHAPE encodes state (play=paused, pause=running);
-    // opacity/cursor encode actionability; a chip emphasizes engaged.
-    const pausePending = busy === "pause";
-    const pauseBtn = actionButton({
-      icon: pausePending ? ICONS.spinner : paused ? ICONS.play : ICONS.pause,
-      engaged: paused,
-      pending: pausePending,
-      readOnly,
-      title: readOnly
-        ? paused
-          ? "Paused — read+write token needed to change"
-          : "Read+write token needed to pause"
-        : paused
-          ? "Resume"
-          : "Pause",
-      onClick: () => runAction(m, paused ? "resume" : "pause"),
-    });
+    // Pause/resume — shown for any provider that supports it. Icon SHAPE encodes
+    // state (play=paused, pause=running); opacity/cursor = actionability.
+    if (m.can_pause) {
+      const paused = m.status === "paused";
+      const pausePending = busy === "pause";
+      actions.append(
+        actionButton({
+          icon: pausePending ? ICONS.spinner : paused ? ICONS.play : ICONS.pause,
+          engaged: paused,
+          pending: pausePending,
+          readOnly,
+          title: readOnly
+            ? paused
+              ? "Paused — read+write token needed to change"
+              : "Read+write token needed to pause"
+            : paused
+              ? "Resume"
+              : "Pause",
+          onClick: () => runAction(m, paused ? "resume" : "pause"),
+        }),
+      );
+    }
 
-    // Mute/unmute. bell-slash=muted, bell=alerting.
-    const mutePending = busy === "mute";
-    const muteBtn = actionButton({
-      icon: mutePending ? ICONS.spinner : m.is_muted ? ICONS.mute : ICONS.unmute,
-      engaged: m.is_muted,
-      pending: mutePending,
-      readOnly,
-      title: readOnly
-        ? m.is_muted
-          ? "Muted — read+write token needed to change"
-          : "Read+write token needed to mute"
-        : m.is_muted
-          ? "Unmute"
-          : "Mute",
-      onClick: () => runAction(m, m.is_muted ? "unmute" : "mute"),
-    });
+    // Mute/unmute — Watch4.me only. bell-slash=muted, bell=alerting.
+    if (m.can_mute) {
+      const mutePending = busy === "mute";
+      actions.append(
+        actionButton({
+          icon: mutePending ? ICONS.spinner : m.is_muted ? ICONS.mute : ICONS.unmute,
+          engaged: m.is_muted,
+          pending: mutePending,
+          readOnly,
+          title: readOnly
+            ? m.is_muted
+              ? "Muted — read+write token needed to change"
+              : "Read+write token needed to mute"
+            : m.is_muted
+              ? "Unmute"
+              : "Mute",
+          onClick: () => runAction(m, m.is_muted ? "unmute" : "mute"),
+        }),
+      );
+    }
 
-    actions.append(pauseBtn, muteBtn);
     li.append(actions);
   }
 

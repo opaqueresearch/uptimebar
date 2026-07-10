@@ -220,11 +220,30 @@ impl Provider for Watch4Me {
         Ok(Some(value))
     }
 
+    fn capabilities(&self) -> super::ActionCaps {
+        super::ActionCaps { pause: true, mute: true }
+    }
+
     async fn monitor_action(
         &self,
-        public_id: &str,
+        id: &str,
         action: MonitorAction,
     ) -> Result<ActionOutcome, ProviderError> {
+        // Actions key on public_id; the caller passes the native Monitor.id, so
+        // resolve id → public_id from the cached status list.
+        let public_id = {
+            let cache = self.cache.lock().unwrap();
+            cache
+                .monitors
+                .iter()
+                .find(|m| m.id == id)
+                .and_then(|m| m.public_id.clone())
+        };
+        let Some(public_id) = public_id else {
+            return Err(ProviderError::Config(
+                "monitor not found (no public_id) — refresh and retry".into(),
+            ));
+        };
         // POST /api/v1/monitors/{public_id}/{pause|resume|mute|unmute}. No body;
         // mute takes ?duration_seconds=N (omit = indefinite). All idempotent.
         let (verb, duration) = match action {
