@@ -33,8 +33,10 @@ struct Resp {
     error: Option<ApiError>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Default)]
 struct ApiError {
+    #[serde(default, rename = "type")]
+    error_type: String,
     #[serde(default)]
     message: String,
 }
@@ -215,6 +217,67 @@ impl Provider for UptimeRobot {
 
         Ok(Some(serde_json::json!({ "monitors": monitors })))
     }
+
+    fn capabilities(&self) -> super::ActionCaps {
+        // Pause/resume via editMonitor. No mute.
+        super::ActionCaps { pause: true, mute: false }
+    }
+
+    async fn monitor_action(
+        &self,
+        id: &str,
+        action: super::MonitorAction,
+    ) -> Result<super::ActionOutcome, ProviderError> {
+        use super::MonitorAction;
+        // editMonitor status: 0 = paused, 1 = active (resume). Mute unsupported.
+        let status = match action {
+            MonitorAction::Pause => "0",
+            MonitorAction::Resume => "1",
+            MonitorAction::Mute { .. } | MonitorAction::Unmute => {
+                return Err(ProviderError::Config("UptimeRobot doesn't support mute.".into()));
+            }
+        };
+        let resp = self
+            .http
+            .post("https://api.uptimerobot.com/v2/editMonitor")
+            .form(&[
+                ("api_key", self.api_key.as_str()),
+                ("format", "json"),
+                ("id", id),
+                ("status", status),
+            ])
+            .send()
+            .await?;
+        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Err(ProviderError::RateLimited);
+        }
+        let body: EditResp = resp
+            .json()
+            .await
+            .map_err(|e| ProviderError::Decode(e.to_string()))?;
+        if body.stat != "ok" {
+            let err = body.error.unwrap_or_default();
+            // A read-only key can't edit — UptimeRobot returns type "not_authorized"
+            // ("You are not allowed to perform this request"). Live-verified.
+            if err.error_type == "not_authorized" || err.message.to_lowercase().contains("not allowed")
+            {
+                return Err(ProviderError::InsufficientScope);
+            }
+            return Err(ProviderError::Decode(format!("edit failed: {}", err.message)));
+        }
+        Ok(super::ActionOutcome {
+            is_paused: Some(status == "0"),
+            is_muted: None,
+            changed: true,
+        })
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct EditResp {
+    stat: String,
+    #[serde(default)]
+    error: Option<ApiError>,
 }
 
 /// `custom_uptime_ratio` is a string; with one requested window it's a single

@@ -217,6 +217,50 @@ impl Provider for BetterStack {
 
         Ok(Some(serde_json::json!({ "monitors": results })))
     }
+
+    fn capabilities(&self) -> super::ActionCaps {
+        // Pause/resume via PATCH {paused}. No mute.
+        super::ActionCaps { pause: true, mute: false }
+    }
+
+    async fn monitor_action(
+        &self,
+        id: &str,
+        action: super::MonitorAction,
+    ) -> Result<super::ActionOutcome, ProviderError> {
+        use super::MonitorAction;
+        let paused = match action {
+            MonitorAction::Pause => true,
+            MonitorAction::Resume => false,
+            MonitorAction::Mute { .. } | MonitorAction::Unmute => {
+                return Err(ProviderError::Config("BetterStack doesn't support mute.".into()));
+            }
+        };
+        // PATCH {base}/api/v2/monitors/{id}  { "paused": bool }
+        let resp = self
+            .http
+            .patch(format!("{}/{}", self.endpoint, id))
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/json")
+            .json(&serde_json::json!({ "paused": paused }))
+            .send()
+            .await?;
+        let status = resp.status();
+        // BetterStack tokens have no clean read-only scope, so a token that reads
+        // fine may still lack write permission — the write is rejected with a 401/403.
+        // Surface that as "needs a read+write token", not the generic "key rejected".
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            return Err(ProviderError::InsufficientScope);
+        }
+        if !status.is_success() {
+            return Err(super::http_status_error(status));
+        }
+        Ok(super::ActionOutcome {
+            is_paused: Some(paused),
+            is_muted: None,
+            changed: true,
+        })
+    }
 }
 
 impl BetterStack {
