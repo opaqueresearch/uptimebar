@@ -202,4 +202,33 @@ impl Provider for Healthchecks {
             changed: true,
         })
     }
+
+    async fn probe_scope(&self) -> Result<super::TokenScope, ProviderError> {
+        // Healthchecks has no scope endpoint, but a READ-ONLY key redacts the
+        // top-level `uuid` (returning only `unique_key`), while a read-write key
+        // includes it. So: any check with a real `uuid` → write; all `unique_key`
+        // only → read. Side-effect-free (same GET as fetch_monitors). Empty list or
+        // any error → Unknown.
+        let resp = self
+            .http
+            .get(&self.endpoint)
+            .header("X-Api-Key", &self.api_key)
+            .header("Accept", "application/json")
+            .send()
+            .await;
+        let Ok(resp) = resp else {
+            return Ok(super::TokenScope::Unknown);
+        };
+        if !resp.status().is_success() {
+            return Ok(super::TokenScope::Unknown);
+        }
+        match resp.json::<Resp>().await {
+            Ok(body) if body.checks.is_empty() => Ok(super::TokenScope::Unknown),
+            Ok(body) if body.checks.iter().any(|c| c.uuid.is_some()) => {
+                Ok(super::TokenScope::Write)
+            }
+            Ok(_) => Ok(super::TokenScope::Read),
+            Err(_) => Ok(super::TokenScope::Unknown),
+        }
+    }
 }

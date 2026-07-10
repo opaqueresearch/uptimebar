@@ -271,6 +271,26 @@ impl Provider for UptimeRobot {
             changed: true,
         })
     }
+
+    async fn probe_scope(&self) -> Result<super::TokenScope, ProviderError> {
+        // getAccountDetails is a WRITE-only endpoint: a main (read-write) key gets
+        // stat:"ok"; a read-only key gets "not_authorized" (live-verified). A clean
+        // side-effect-free read that reveals scope. Any transport error → Unknown.
+        let resp = self
+            .http
+            .post("https://api.uptimerobot.com/v2/getAccountDetails")
+            .form(&[("api_key", self.api_key.as_str()), ("format", "json")])
+            .send()
+            .await;
+        let Ok(resp) = resp else {
+            return Ok(super::TokenScope::Unknown);
+        };
+        match resp.json::<EditResp>().await {
+            Ok(b) if b.stat == "ok" => Ok(super::TokenScope::Write),
+            Ok(_) => Ok(super::TokenScope::Read),
+            Err(_) => Ok(super::TokenScope::Unknown),
+        }
+    }
 }
 
 #[derive(serde::Deserialize)]
