@@ -61,11 +61,17 @@ type; see [Deep-links](#click-to-open--deep-links).
   read-only polling and also enables per-check deep-links.
 
 ### Uptime Kuma
+> **Not actively pursued.** Kuma support is read-only (public status page only) and
+> is **not offered in the Add-provider picker** — the Kuma ecosystem already has
+> purpose-built menu-bar apps, so it's a low-priority fit. The adapter is retained so
+> existing configs keep working. Details below apply if re-enabled.
+
 - **Base URL:** the **full public status-page URL**, e.g.
   `https://kuma.example.com/status/prod`.
 - **Key:** none.
 - Only monitors **published on that status page** are visible (it reads the
   status-page JSON). Full-account coverage via Socket.IO is a future enhancement.
+- No actions (pause/resume/mute) — the status-page path is read-only/unauthenticated.
 
 ## Click-to-open & deep-links
 
