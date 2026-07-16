@@ -24,7 +24,7 @@ easy to drift into saying more than is true.
 **Canonical user-facing copy** — use this verbatim:
 
 > Telemetry is opt-in and off by default. When enabled, your app sends anonymous,
-> coarse data to `relay.opaqueresearch.com`, a separate service that strips source
+> coarse data to `scrub.opaqueresearch.com`, a separate service that strips source
 > IP addresses before forwarding to uptimebar.app. uptimebar.app never receives
 > your IP address. We do not log IPs at the relay, and we do not share them with
 > the uptimebar.app service. Both are operated by Opaque Research LLC — this is a
@@ -79,7 +79,7 @@ paying for OHTTP. Say so; don't dress them up.
 └───────────────────────┬───────────────────────────────────┘
                         │ HTTPS (TLS)
                         ▼
-        ┌────────── scrub — Caddy on Fly.io ───────────────┐
+        ┌── scrub.opaqueresearch.com — Caddy on Fly.io ────┐
         │  github.com/opaqueresearch/scrub                 │
         │  receives Fly-Client-IP / X-Forwarded-For        │
         │    (Fly injects these; not disableable)          │
@@ -406,7 +406,9 @@ canonical copy's last sentence gets replaced by the stronger claim.
   this **cannot be disabled at the platform level** — so the relay unavoidably
   *receives* the IP. Stripping is our code's job, not a platform guarantee. This
   is true of every reverse proxy anywhere; seeing the client IP is how one works.
-- **Relay hostname** — `relay.opaqueresearch.com` is the sketch. TBD.
+- ~~Relay hostname~~ **Decided: `scrub.opaqueresearch.com`**
+  ([repo](https://github.com/opaqueresearch/scrub)). CNAME at Porkbun → Fly; DNS
+  stays at Porkbun, no nameserver delegation.
 - **Retention window** — "short" needs a number.
 - **Rollup job** — where it runs, on what schedule.
 - **Consent UX copy** — the layered first-run text is unwritten.
