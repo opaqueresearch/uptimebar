@@ -105,9 +105,9 @@ Different service, different host, different codebase, policy says don't join
 them.
 
 **What this is not:** separation of *parties*. Both are Opaque Research LLC. We
-are the account holder on both. This is a Chinese wall — a recognized, defensible
-control, and one that an umbrella entity can always breach. It works precisely
-because we describe it as what it is.
+are the account holder on both. It's a recognized, defensible control, and one
+whose limits we state rather than paper over. It works precisely because we
+describe it as what it is.
 
 ### The relay: `scrub`
 
@@ -322,17 +322,51 @@ breaks.
 This means the provider breakdown is missing for opt-outs. That is honest data
 loss and we accept it.
 
+**The compat check routes through scrub too.** Decided, and it matters: if it
+went straight to `api.uptimebar.app`, then opting out of telemetry would mean
+your IP reaches uptimebar.app on *every* version check — undoing the architecture
+for precisely the users who cared most about it. Same relay, same strip, one
+trust story, no asterisk in the copy.
+
+The cost is real and worth naming: scrub is now on the critical path for a
+feature every user depends on, not just for opt-in telemetry. A scrub outage
+breaks version checks. That argues for the app degrading quietly when the compat
+check fails — a version check is not worth an error dialog — and for scrub
+staying as boring as it currently is.
+
 ---
 
 ## Retention
 
-- Roll up to aggregate counts quickly.
-- Discard raw events on a **short** window.
-- With no cross-period mapping, raw rows have limited value anyway — the rollup is
-  the product.
+**Raw events: 30 days. Then rolled up to aggregate counts and dropped.**
+Aggregates are kept indefinitely — they're the product.
 
-Retention is policy here, not platform-enforced. Write the rollup job; don't rely
-on remembering.
+First, the thing that makes this cheap: **a period is one calendar month, not a
+day.** An install that opts in sends roughly *one payload per month*. There is no
+per-hour or per-day data anywhere; the payload has no time dimension finer than
+which month it was sent in. So "30 days of raw data" is one row per opted-in
+install, not a time series.
+
+Why 30 days is the right number rather than a compromise:
+
+- Periods are monthly, so a raw row past its period boundary has already been
+  counted into that month's aggregate.
+- `period_id` never repeats and has no stored mapping, so an old raw row can't be
+  linked to anything — not to a later period, not to an install, not to a person.
+  It is already spent.
+- "A month" is legible to someone reading the disclosure. "Short" invites
+  suspicion, and vague words never get tightened later.
+
+We're not giving anything up. The per-period-UUID design already destroyed the
+value of keeping raw rows; the retention window just makes that explicit.
+
+**Ordering constraint, not an implementation detail:** the rollup job is what
+*enforces* retention. If ingest ships before the rollup exists, raw rows
+accumulate against a promise we aren't keeping. Ingest and rollup ship together
+or not at all.
+
+Retention here is policy, not platform-enforced (an OHTTP/Analytics-Engine style
+setup would enforce it structurally). Write the job; don't rely on remembering.
 
 ---
 
@@ -409,12 +443,27 @@ canonical copy's last sentence gets replaced by the stronger claim.
 - ~~Relay hostname~~ **Decided: `scrub.opaqueresearch.com`**
   ([repo](https://github.com/opaqueresearch/scrub)). CNAME at Porkbun → Fly; DNS
   stays at Porkbun, no nameserver delegation.
-- **Retention window** — "short" needs a number.
-- **Rollup job** — where it runs, on what schedule.
-- **Consent UX copy** — the layered first-run text is unwritten.
-- **Version/compat endpoint** — this doc covers the telemetry half. The compat
-  feed (provider API version tracking, app update notification) is related but
-  separate; it needs its own design.
+- ~~Retention window~~ **Decided: 30 days raw, then rollup.** Aggregates kept
+  indefinitely. See [Retention](#retention) — a period is a calendar month, so
+  this is one row per opted-in install, not a time series.
+- ~~Does the compat check route through scrub?~~ **Decided: yes.** Otherwise
+  opting out of telemetry would send your IP to uptimebar.app on every version
+  check. See [Version checking is independent of
+  telemetry](#version-checking-is-independent-of-telemetry).
+
+Still open — none block this doc, all are implementation against systems that
+don't exist yet:
+
+- **Rollup job** — where it runs, on what schedule. Note the ordering constraint
+  in [Retention](#retention): it ships *with* ingest, not after.
+- **Consent UX copy** — the layered first-run text. Requirements are specified in
+  [Consent](#consent); the strings should be written against a real settings pane,
+  not blind.
+- **Compat feed design** — routing is settled (through scrub), but the feed itself
+  — provider API version tracking, app update notification, what the response
+  looks like — needs its own doc.
+- **scrub deployment** — `fly deploy`, the staging leak test (CI can't inject
+  `Fly-Client-IP`; that's Fly's proxy), and `SCRUB_TOKEN`.
 
 ---
 
