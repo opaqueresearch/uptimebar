@@ -2,12 +2,25 @@
 
 **Audience:** the Watch4.me service/backend team working on the Watch4.me codebase.
 
-**Context:** UptimeBar is a cross-platform menu-bar/tray uptime notifier and a
-deliberate **funnel into the Watch4.me SaaS**. It is provider-agnostic (also
-speaks UptimeRobot, Uptime Kuma, BetterStack, Healthchecks), but Watch4.me is
-the first-party provider — the one backend we control on both ends. This doc is
-the prioritized list of what UptimeBar needs *from the Watch4.me service* to
-serve its users better and convert more of them into Watch4.me users.
+**Context:** UptimeBar is a cross-platform menu-bar/tray uptime notifier.
+
+**Why it exists:** monitoring alerts land in channels people don't watch. If you
+sit at a desktop all day, rarely read email, and don't want more SMS, then status
+belongs where you're already looking — the menubar. Dashboard-like function and
+alerting at the point of focus, rather than in a channel you check later.
+
+**Why it's multi-provider:** the pattern Watch4.me was built around is solo devs
+stitching together several providers' free tiers to assemble the feature set they
+need. If that's how people actually work, one pane showing all of them is the
+obvious thing to build. UptimeBar speaks UptimeRobot, BetterStack, and
+Healthchecks alongside Watch4.me, and aims for feature parity across all of them
+wherever each API permits it (see
+[`PROVIDER-MATRIX.md`](PROVIDER-MATRIX.md)).
+
+Watch4.me is the one backend we control on both ends — which is why this doc
+exists. When UptimeBar needs an endpoint the API doesn't have, we can add it here;
+for every other provider we can only ask. This is the prioritized list of what
+UptimeBar needs from the Watch4.me service.
 
 ## How UptimeBar consumes Watch4.me today
 
@@ -50,9 +63,9 @@ else `is_up` → Up/Down. (A flaky/unreachable API maps to Unknown, never Down.)
 | **P0** | Return **`public_id`** in dashboard JSON | tiny (one field) | per-monitor deep-links; client already supports it |
 | **P0** | **Document/version** the integration endpoint + field contract | small | ship to customers without fear of silent breakage |
 | **P1** | Confirm **list completeness / pagination** behavior | small | correctness with many monitors |
-| **P1** | One-click **"Connect UptimeBar"** token flow | medium | funnel conversion (onboarding is where funnel apps leak) |
+| **P1** | One-click **"Connect UptimeBar"** token flow | medium | onboarding: hand-pasting a token is the worst step in setup |
 | **P2** | **Read-only** token scope | small–med | least-privilege; user trust |
-| **P2** | Richer per-monitor fields (latency, down-duration, status-change time) | medium | richer popover; differentiates the first-party provider |
+| **P2** | Richer per-monitor fields (latency, down-duration, status-change time) | medium | popover parity with what other providers already return |
 
 ---
 
@@ -68,9 +81,8 @@ dashboard, not the specific monitor.
   (`watch4me.rs`, the `public_id` field + `detail_url` construction).
 - **Watch4.me work: add one field** to the JSON the dashboard endpoint already
   returns — the same identifier already used in monitor page URLs.
-- **Why it matters for the funnel:** a click that lands on the *specific*
-  monitor page is a far stronger pull into the Watch4.me web UI than dumping the
-  user on the dashboard. Competing providers (BetterStack, Healthchecks) already
+- **Why it matters:** a click should land on the *specific* monitor, not dump the
+  user on a dashboard to hunt for it. Other providers (BetterStack, Healthchecks) already
   deep-link to the exact monitor; the first-party provider should not be worse.
 
 ### P0 — Document / version the integration endpoint
@@ -95,12 +107,11 @@ Please confirm: is the returned list always complete? If it can paginate, how
 
 ### P1 — One-click "Connect UptimeBar" token flow
 
-Today a user must find and paste a `w4m_` token by hand. Funnel conversion would
-improve markedly with a **"Connect UptimeBar" affordance in the Watch4.me web
-UI** that mints a scoped token and hands it to the app with minimal friction —
-e.g. a one-click copy page, or (better) a deep link / custom URL scheme that
-passes the token back into UptimeBar. Onboarding friction is where funnel apps
-leak users.
+Today a user must find and paste a `w4m_` token by hand — the worst step in
+setup, and the one most likely to be got wrong. A **"Connect UptimeBar"
+affordance in the Watch4.me web UI** that mints a scoped token and hands it to
+the app would remove it: a one-click copy page, or (better) a deep link / custom
+URL scheme that passes the token back into UptimeBar.
 
 ### P2 — Read-only token scope
 
@@ -110,33 +121,36 @@ tokens can be minted **read-only**; it's both correct and reassuring to users.
 
 ### P2 — Richer per-monitor fields (additive, optional)
 
-UptimeBar's normalized model is lean, but Watch4.me — as the first-party
-provider — could light up UX the others can't. All optional/additive:
+UptimeBar's normalized model is lean. These fields are what other providers
+already return and Watch4.me does not — closing them is parity work, not
+embellishment. All optional/additive:
 
 - **Last response time / latency (ms)** → a "degraded but up" signal and
-  sparklines; no other provider feeds this, so it would differentiate Watch4.me.
+  sparklines. UptimeRobot and BetterStack both feed this; without it, Watch4.me
+  users see a worse popover than everyone else.
 - **Current incident / outage duration** ("down for 14m") → more useful than a
   bare red dot.
 - **Last status-change timestamp** → "up since…" / "down since…".
-- **Explicit degraded/unknown health** beyond binary `is_up` → makes UptimeBar's
-  "Problems" (down + degraded) filter shine for Watch4.me specifically.
+- **Explicit degraded/unknown health** beyond binary `is_up` → lets UptimeBar's
+  "Problems" (down + degraded) filter work correctly rather than collapsing
+  degraded into up.
 
 ### Attribution signal: the UptimeBar User-Agent
 
 UptimeBar sends `User-Agent: UptimeBar/<version>` (e.g. `UptimeBar/0.2.0`) on
-every request, so Watch4.me can already **identify and segment funnel traffic
-from the app**. A future UptimeBar enhancement will enrich this to include OS +
-arch (e.g. `UptimeBar/0.2.0 (macOS; aarch64)`) for finer analysis — worth
-logging/segmenting on the Watch4.me side.
+every request, so Watch4.me can identify API traffic from the app — useful for
+debugging integration issues and for knowing which client versions are still in
+the field before changing a contract. A future enhancement will enrich this with
+OS + arch (e.g. `UptimeBar/0.2.0 (macOS; aarch64)`).
 
 ---
 
 ## TL;DR for the Watch4.me team
 
 If you do **one** thing: **add `public_id` to the `/api/v1/dashboard/`
-response.** One field, no UptimeBar changes, instantly upgrades every Watch4.me
-monitor click from "dump on dashboard" to "open the exact monitor" — better UX
-and a stronger funnel into the web app.
+response.** One field, no UptimeBar changes, and every Watch4.me monitor click
+goes from "dump on dashboard" to "open the exact monitor" — which is what
+BetterStack and Healthchecks users already get.
 
 ---
 
@@ -266,7 +280,7 @@ cheap while still powering the rich detail view when a human is looking.
   caching with interior mutability, 304 handling, `state_since`-driven duration,
   two-tier popover fetch.
 - **watch4.me#710:** read-only token scope + self-serve token UI (one-click
-  "Connect UptimeBar"). Needed to remove the hand-paste-a-token funnel friction.
+  "Connect UptimeBar"). Removes the hand-paste-a-token step from setup.
 
 ---
 

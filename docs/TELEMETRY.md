@@ -4,9 +4,10 @@
 
 Opt-in, off by default, anonymous, coarse. Two questions justify it:
 
-1. **Which providers do people actually configure?** Specifically, the Watch4.me
-   attach rate (the funnel KPI) and the multi-provider ratio (does the
-   "single pane of glass" thesis hold?).
+1. **Which providers do people actually configure, and do they use more than
+   one?** Provider adoption tells us where integration effort is worth spending;
+   the multi-provider ratio tells us whether the aggregated view is the feature
+   people came for.
 2. **Are people on a version that still works?** Provider APIs change; we need to
    know which app versions are live before we can tell anyone their integration
    broke.
@@ -229,7 +230,7 @@ see [Fixed schema](#fixed-schema-why-every-key-is-always-sent).
 | `period` | bucket the counts | month granularity |
 | `app_version` | which versions are live; compat gating | |
 | `os` / `os_major` | platform mix; coarse | major only, never full build |
-| `providers_configured` | **the funnel KPI** — Watch4.me attach rate, multi-provider ratio | fixed key set, always all four |
+| `providers_configured` | provider adoption; multi-provider ratio | fixed key set, always all four |
 | `monitor_counts_bucketed` | scale distribution per provider | fixed key set; bucketed, never exact |
 
 **Bucket boundaries:** `0`, `1-5`, `6-20`, `21-50`, `50+`.

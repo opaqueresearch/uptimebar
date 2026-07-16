@@ -43,9 +43,8 @@ back to the runtime 403.
 
 - **Status (cheap tier):** `GET /api/v1/monitors/status` returns the whole fleet in
   **one call**, with a strong **ETag**. Send `If-None-Match`; steady state is a
-  `304` with no body — near-free polling. *No competitor has this; it's the funnel's
-  genuine architectural edge.* Gotcha: a `304` has no body — you must handle it
-  **before** `.json()` or you get a decode error.
+  `304` with no body — near-free polling. Gotcha: a `304` has no body — you must
+  handle it **before** `.json()` or you get a decode error.
 - **Detail tier:** `GET /api/v1/dashboard/` → latency (`latest_response_time_ms`,
   a **float** — bind to `f64`, not `int`), `uptime_pct`, `response_history[]` with
   per-bucket `failures` (the only provider whose sparkline can mark outages).
@@ -180,9 +179,9 @@ full status-page URL (`.../status/{slug}`).
 - **Self-hosted:** by design; UptimeBar accepts a custom base URL.
 
 **Status in UptimeBar:** currently offered read-only where a public status page
-exists; **paused from the Add-provider picker** (low funnel yield — Kuma users are
-self-hosters, well served by purpose-built third-party menu-bar apps). Adapter
-retained so existing configs keep working.
+exists; **paused from the Add-provider picker** — the Kuma ecosystem already has
+purpose-built menu-bar clients, so we'd be duplicating tools better suited to it.
+Adapter retained so existing configs keep working. Removal tracked in #33.
 
 ---
 
@@ -197,11 +196,15 @@ retained so existing configs keep working.
    `200 not_authorized` (UptimeRobot), field redaction (Healthchecks), or an
    ambiguous rejection (BetterStack). Map each to `InsufficientScope` so the UI shows
    "needs a read+write token," not a generic error.
-4. **Proactive scope detection beats click-then-403** — but only Watch4.me has a real
-   endpoint. We found side-effect-free proxies for UptimeRobot (`getAccountDetails`)
-   and Healthchecks (uuid redaction); BetterStack has none and must use the 403.
-5. **Aggregation shape is the funnel story.** One-call-for-the-fleet (Watch4.me,
+4. **Proactive scope detection beats click-then-403.** Only Watch4.me exposes a real
+   introspection endpoint, so for the rest we went looking: side-effect-free proxies
+   found for UptimeRobot (`getAccountDetails`) and Healthchecks (uuid redaction).
+   BetterStack has no signal available, so it falls back to the runtime 403 —
+   surfaced as a real message rather than a silent failure. Three of four providers
+   gate their buttons before the click; the fourth degrades honestly.
+5. **Aggregation shape drives polling cost.** One-call-for-the-fleet (Watch4.me,
    UptimeRobot-with-params) vs. N+1 fan-out (BetterStack) is the difference between a
-   snappy always-on glance and a costly one. Fetch detail on-demand, never per-poll.
+   cheap always-on glance and an expensive one. Fetch detail on-demand, never
+   per-poll — that keeps the N+1 providers viable rather than penalizing their users.
 6. **Deep-links are inconsistent** — verify the route resolves (we hit 404s on
    assumed slug routes for both Healthchecks and Watch4.me).
