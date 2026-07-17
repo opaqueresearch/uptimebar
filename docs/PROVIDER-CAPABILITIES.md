@@ -1,9 +1,14 @@
 # Provider Capability Matrix
 
-What each supported provider's API actually exposes, audited 2026-06-27 for
-UptimeBar's funnel strategy (issue #5) and to decide which feature-contrasts with
-Watch4.me are *genuine* (issue #8). The honesty guardrail: only surface a
-capability gap in the UI if it's real — this doc is the source of truth.
+What each supported provider's API actually exposes, audited 2026-06-27 against
+each provider's own docs and (where open-source) source.
+
+**Why this exists:** UptimeBar aims for feature parity across every provider its
+API access permits. To do that we had to know precisely what each API offers —
+and, just as importantly, what it doesn't, so we never imply a provider lacks a
+capability it actually has. This doc is the source of truth for that, and the
+guardrail is: *only surface a capability difference in the UI if it is real and
+verified here.*
 
 **Legend**
 - ✅ **Confirmed** — proven from our own adapter/live data, or unambiguous in docs.
@@ -306,10 +311,24 @@ To fully verify before building any nudge, prioritized:
 4. **BetterStack** — measure the undocumented rate limit; confirm the N+1 cost is
    acceptable before surfacing latency/SLA.
 
-## Implications for issue #5 (funnel nudges) — what's HONEST to build
-- ✅ **Deep-link superiority** — the strongest true contrast. Watch4.me links work
-  cleanly; BetterStack/Kuma can't, Healthchecks needs RW key, UptimeRobot unofficial.
-- ✅ **"One fast call / conditional polling"** — a real efficiency story (Settings/Help copy).
-- ❌ **Do NOT** claim sparklines/latency/uptime as Watch4.me-only — they're broadly available.
-- ⚠️ **Remote mute/ack** as a contrast depends on Watch4.me shipping it (#710); pause
-  exists on several providers, so frame around *mute/ack* specifically, not pause.
+## What is honest to say (issue #5)
+
+The rule: **a capability difference may only be mentioned if it is verified above
+and still true.** Most of this section is a list of things *not* to claim.
+
+- ❌ **Do NOT** claim sparklines / latency / uptime % as Watch4.me-only — they are
+  **broadly available** across providers. Claiming otherwise would be false.
+- ❌ **Do NOT** frame pause/resume as a differentiator — it works on UptimeRobot,
+  BetterStack, and Healthchecks too, and UptimeBar implements it for all of them.
+- ⚠️ **Mute/ack** is currently Watch4.me-only, and only once it ships (#710). If any
+  other provider adds a mute API, this stops being true and comes out of the copy.
+- ⚠️ **Deep-links** — Watch4.me's resolve cleanly via `public_id`; BetterStack has no
+  team slug in the API, Healthchecks needs a RW key, UptimeRobot's route is
+  unofficial. State the mechanism, never the word "superiority" — this is an API
+  surface difference, not a product judgement, and it changes the day they add a
+  field.
+- ✅ **Conditional polling (ETag/304)** — a real, factual efficiency property worth
+  documenting. Describe what it does; don't editorialize about who lacks it.
+
+Anything found to be untrue, or made untrue by a provider shipping something, comes
+out of the UI immediately. This list is a constraint on us, not a pitch.
