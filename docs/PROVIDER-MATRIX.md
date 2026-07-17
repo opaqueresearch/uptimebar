@@ -17,7 +17,9 @@ parity across providers wherever the API permits it, and the workarounds are in
 from an API, we say so and move on; where it's awkward, we wrote code. The one
 asymmetry we can't engineer away: we can add endpoints to Watch4.me because we
 run it, and we can't do that for anyone else — so gaps elsewhere stay gaps until
-that provider chooses to close them.
+that provider chooses to close them. The Watch4.me endpoints UptimeBar depends on
+are documented in
+[`PROVIDER-INTEGRATION-NOTES.md`](PROVIDER-INTEGRATION-NOTES.md).
 
 Legend: ✅ clean / native · ⚠️ workaround or caveat · ❌ not possible via the API
 
